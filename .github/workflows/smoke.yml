@@ -1,0 +1,84 @@
+name: smoke
+
+# Step 1 of the plan: prove that WebGL actually DRAWS on a GPU-less GitHub runner
+# before anyone spends hours rendering. This job is cheap (~10-20 min) and is the only
+# thing that can tell us which GL backend to use for the real render.
+#
+# Trigger: Actions tab -> smoke -> Run workflow.  Nothing renders automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      gl:
+        description: "GL backend(s). Comma separated. Empty = try the whole matrix."
+        required: false
+        default: ""
+      frames:
+        description: "Frames to probe (comma separated)"
+        required: false
+        default: "30,300,900,1500"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        gl: ${{ github.event.inputs.gl == '' && fromJSON('["swangle","angle-egl","angle"]') || fromJSON(format('["{0}"]', github.event.inputs.gl)) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # headless chrome needs these on a bare ubuntu runner
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2t64 fonts-liberation || \
+          sudo apt-get install -y -qq --no-install-recommends \
+            ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libasound2 fonts-liberation
+          ffmpeg -version | head -1
+          node -v
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: get chrome
+        run: node tools/ensure-browser.mjs
+
+      - name: typecheck
+        run: npx tsc --noEmit
+
+      - name: "PROBE: does WebGL draw with GL=${{ matrix.gl }}?"
+        env:
+          GL: ${{ matrix.gl }}
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+        run: |
+          node tools/probe.mjs $(echo "${{ github.event.inputs.frames }}" | tr ',' ' ') 2>&1 | tee "out/probe_${{ matrix.gl }}.txt"
+          # also dump what chrome reports about its renderer
+          node -e '
+            const {execFileSync}=require("child_process");
+            const be=require("./out/chrome.json").chrome;
+            try{ console.log(execFileSync(be,["--no-sandbox","--headless=new","--disable-gpu","--dump-dom","about:blank"],{encoding:"utf8"}).slice(0,200)); }catch(e){}
+          ' || true
+
+      - name: upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ matrix.gl }}
+          path: |
+            out/probe_${{ matrix.gl }}.txt
+            out/probe/*.png
+          if-no-files-found: warn
+          retention-days: 3

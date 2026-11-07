@@ -1,0 +1,8 @@
+node_modules/
+out/
+.rtmp/
+venv/
+__pycache__/
+*.log
+qa-gate-out/
+voice/voice.mp3
