@@ -1,0 +1,278 @@
+name: render
+
+# The real render. Runs only when you press Run workflow — nothing is automatic.
+#
+# Shape:
+#   prep    -> typecheck, get chrome, probe that WebGL draws, plan the chunks
+#   render  -> one parallel job per chunk (matrix)
+#   stitch  -> concat the chunks losslessly, prove the frame count
+#   gate    -> qa-gate.sh decides whether this is finished
+#
+# A chunk job that fails does not kill the others (fail-fast: false), and every chunk is
+# uploaded as its own artifact so a single failed chunk can be re-run without redoing the
+# whole film.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chunks:
+        description: "How many parallel chunks (2-16). More = faster, but each job pays ~2 min setup."
+        required: false
+        default: "6"
+      gl:
+        description: "GL backend. swangle = software (correct on a GPU-less runner)."
+        required: false
+        default: "swangle"
+      scale:
+        description: "Render scale. 4/3 = 1440x2560 FINAL. 0.4 = proxy."
+        required: false
+        default: "4/3"
+      crf:
+        description: "x264 quality. 16 = final, 24 = proxy."
+        required: false
+        default: "16"
+      probe_only:
+        description: "If true, stop after the WebGL probe (no render)."
+        required: false
+        default: "false"
+
+concurrency:
+  group: render-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: --max-old-space-size=8192
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      chunks: ${{ steps.plan.outputs.chunks }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 fonts-liberation || true
+          sudo apt-get install -y -qq --no-install-recommends libasound2t64 || \
+            sudo apt-get install -y -qq --no-install-recommends libasound2 || true
+          ffmpeg -version | head -1
+
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+
+      - name: get chrome
+        run: node tools/ensure-browser.mjs
+
+      - name: "PROBE: prove WebGL draws before rendering anything"
+        env:
+          GL: ${{ github.event.inputs.gl }}
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+        run: |
+          node tools/probe.mjs 30 300 900 1500 2>&1 | tee out/probe.txt
+          grep -q "RESULT: WebGL draws here" out/probe.txt || {
+            echo "::error::WebGL does not draw on this runner with GL=${{ github.event.inputs.gl }}. Not starting the render."
+            exit 1
+          }
+
+      - name: plan chunks
+        id: plan
+        run: |
+          N="${{ github.event.inputs.chunks }}"
+          TOTAL=$(node -e "const s=require('fs').readFileSync('src/videos/stink/story.ts','utf8');const m=s.match(/export const TOTAL = (\d+)/);console.log(m?m[1]:'')")
+          [ -n "$TOTAL" ] || { echo "::error::could not read TOTAL from story.ts"; exit 1; }
+          echo "total frames: $TOTAL"
+          echo "chunks: $N"
+          MAP=$(bash tools/plan-chunks.sh "$TOTAL" "$N" | node -e '
+            const lines=require("fs").readFileSync(0,"utf8").trim().split("\n").filter(Boolean);
+            const inc=lines.map(l=>{const[i,a,b]=l.split(/\s+/).map(Number);return{i,a,b};});
+            console.log(JSON.stringify({include:inc}));
+          ')
+          echo "matrix=$MAP" >> "$GITHUB_OUTPUT"
+          echo "chunks=$N" >> "$GITHUB_OUTPUT"
+          echo "$MAP" | head -c 500
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe
+          path: |
+            out/probe.txt
+            out/probe/*.png
+          retention-days: 7
+
+  render:
+    needs: prep
+    if: github.event.inputs.probe_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix: ${{ fromJSON(needs.prep.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 fonts-liberation || true
+          sudo apt-get install -y -qq --no-install-recommends libasound2t64 || \
+            sudo apt-get install -y -qq --no-install-recommends libasound2 || true
+
+      - run: npm ci --no-audit --no-fund
+      - run: node tools/ensure-browser.mjs
+
+      - name: "render chunk ${{ matrix.i }}: frames ${{ matrix.a }}-${{ matrix.b }}"
+        env:
+          GL: ${{ github.event.inputs.gl }}
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+          LOG: out/chunk_${{ matrix.i }}.log
+        run: |
+          mkdir -p out/chunks
+          bash tools/render-chunk.sh "out/chunks/chunk_${{ matrix.i }}.mp4" \
+            ${{ matrix.a }} ${{ matrix.b }} \
+            "${{ github.event.inputs.scale }}" \
+            "${{ github.event.inputs.crf }}" 1 \
+            2>&1 | tee "out/chunk_${{ matrix.i }}.txt"
+
+      - name: "chunk ${{ matrix.i }} sanity (frames + pixels)"
+        run: |
+          F=out/chunks/chunk_${{ matrix.i }}.mp4
+          N=$(ffprobe -v error -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 "$F")
+          WANT=$(( ${{ matrix.b }} - ${{ matrix.a }} + 1 ))
+          echo "chunk ${{ matrix.i }}: $N frames (want $WANT)"
+          [ "$N" = "$WANT" ] || { echo "::error::chunk ${{ matrix.i }} has $N frames, expected $WANT"; exit 1; }
+          # a blank chunk renders fine and has the right frame count — check the pixels
+          ffmpeg -v error -i "$F" -vf "signalstats,metadata=print:file=-" -f null - 2>&1 \
+            | grep -o "YHIGH=[0-9.]*" | head -3 || true
+          SPREAD=$(ffmpeg -hide_banner -i "$F" -vf "signalstats,metadata=print" -f null - 2>&1 \
+            | awk -F= '/YLOW/{lo+=$2;n++} /YHIGH/{hi+=$2} END{if(n)printf "%d", (hi/n)-(lo/n); else print 0}')
+          echo "mean tonal spread: $SPREAD"
+          [ "$SPREAD" -gt 20 ] || { echo "::error::chunk ${{ matrix.i }} looks blank (spread $SPREAD)"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chunk-${{ matrix.i }}
+          path: |
+            out/chunks/chunk_${{ matrix.i }}.mp4
+            out/chunk_${{ matrix.i }}.log
+            out/chunk_${{ matrix.i }}.txt
+          retention-days: 7
+
+  stitch:
+    needs: [prep, render]
+    if: github.event.inputs.probe_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: system deps
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          path: dl
+
+      - name: stitch
+        run: |
+          ls -R dl | head -40
+          mkdir -p out
+          # Order by the numeric index, not by string: "chunk-10" sorts before "chunk-2"
+          # under a plain sort, which would silently splice the film out of order.
+          CHUNKS=$(ls -d dl/chunk-* \
+            | sed 's#.*/chunk-##' \
+            | sort -n \
+            | while read i; do echo "dl/chunk-$i/chunk_$i.mp4"; done)
+          echo "chunks in order:"; echo "$CHUNKS"
+          bash tools/stitch.sh out/video_silent.mp4 $CHUNKS
+
+      - name: concat the render logs
+        run: |
+          mkdir -p out
+          : > out/render.log
+          for i in $(ls -d dl/chunk-* | sed 's#.*/chunk-##' | sort -n); do
+            cat "dl/chunk-$i/chunk_$i.log" >> out/render.log 2>/dev/null || true
+          done
+          wc -l out/render.log || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silent-video
+          path: out/video_silent.mp4
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-log
+          path: out/render.log
+          retention-days: 7
+
+  gate:
+    needs: [stitch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: silent-video
+          path: out
+      - uses: actions/download-artifact@v4
+        with:
+          name: render-log
+          path: out
+          continue-on-error: true
+
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-pip
+          pip install --quiet numpy scipy pillow || pip3 install --quiet --break-system-packages numpy scipy pillow
+
+      - name: mix audio
+        run: |
+          if [ -f public/mix.wav ]; then
+            bash tools/mux.sh out/video_silent.mp4 public/mix.wav out/video.mp4
+          else
+            echo "::warning::no public/mix.wav — gating the silent video. Duration/word checks still apply."
+            cp out/video_silent.mp4 out/video.mp4
+          fi
+
+      - name: "THE GATE — qa-gate decides if this is finished"
+        run: |
+          bash tools/qa-gate.sh out/video.mp4 out/render.log shots.json 2>&1 | tee out/gate.txt
+          echo "gate exit: ${PIPESTATUS[0]}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final
+          path: |
+            out/video.mp4
+            out/gate.txt
+          retention-days: 14

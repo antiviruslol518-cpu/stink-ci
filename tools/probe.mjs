@@ -10,7 +10,7 @@
 // Exit:   0 = drawn, 1 = blank/failed
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { resolveChromeOrExit, chromiumOptions } from "./chrome.mjs";
 
 const frames = process.argv.slice(2).map(Number).filter((n) => Number.isFinite(n));
@@ -53,19 +53,16 @@ console.log(`probe scale ${scale} -> ${Math.round(comp.width * scale)}x${Math.ro
 
 fs.mkdirSync("out/probe", { recursive: true });
 
-/** YAVG/YSTD from ffmpeg signalstats. A blank frame has YSTD ~ 0 and a flat YAVG. */
+/** Signal statistics from ffmpeg. A blank frame has a near-zero YLOW..YHIGH spread.
+ *  ffmpeg writes these to STDERR, so spawnSync (which keeps both streams) is required —
+ *  execFileSync only returns stdout on success. */
 function stats(file) {
-  try {
-    const out = execFileSync(
-      "ffmpeg",
-      ["-hide_banner", "-i", file, "-vf", "signalstats,metadata=print", "-f", "null", "-"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
-    return parseStats(out);
-  } catch (e) {
-    const s = `${e.stderr || ""}${e.stdout || ""}`;
-    return parseStats(s);
-  }
+  const r = spawnSync(
+    "ffmpeg",
+    ["-hide_banner", "-i", file, "-vf", "signalstats,metadata=print", "-f", "null", "-"],
+    { encoding: "utf8" },
+  );
+  return parseStats(`${r.stdout || ""}${r.stderr || ""}`);
 }
 
 function parseStats(text) {
@@ -73,7 +70,13 @@ function parseStats(text) {
     const m = text.match(new RegExp(`${k}=([0-9.]+)`));
     return m ? Number(m[1]) : null;
   };
-  return { yavg: pick("lavfi.signalstats.YAVG"), ystd: pick("lavfi.signalstats.YSTD"), ymax: pick("lavfi.signalstats.YMAX") };
+  return {
+    yavg: pick("lavfi.signalstats.YAVG"),
+    ylow: pick("lavfi.signalstats.YLOW"),
+    yhigh: pick("lavfi.signalstats.YHIGH"),
+    ymin: pick("lavfi.signalstats.YMIN"),
+    ymax: pick("lavfi.signalstats.YMAX"),
+  };
 }
 
 const results = [];
@@ -95,6 +98,9 @@ for (const f of frames) {
       browserExecutable: be,
       chromiumOptions: opts,
       scale,
+      // Software WebGL is slow; Remotion's default page-function timeout is 30 s and a
+      // three.js scene with a shader-compile on first frame can blow past it.
+      timeoutInMilliseconds: Number(process.env.STILL_TIMEOUT_MS || 180000),
     });
   } catch (e) {
     ok = false;
@@ -108,11 +114,13 @@ for (const f of frames) {
   }
   const size = fs.statSync(out).size;
   const st = stats(out);
-  const drawn = st.ystd !== null && st.ystd > 3 && size > 2000;
+  // Blank = almost no tonal spread. A drawn 3D scene at any scale has YLOW..YHIGH wide open.
+  const spread = st.yhigh !== null && st.ylow !== null ? st.yhigh - st.ylow : 0;
+  const drawn = spread > 20 && size > 2000;
   console.log(
-    `frame ${f}  ${secs.toFixed(1)}s  ${(size / 1024).toFixed(0)} KB  YAVG=${st.yavg} YSTD=${st.ystd} YMAX=${st.ymax}  ${drawn ? "DRAWN" : "BLANK"}`,
+    `frame ${f}  ${secs.toFixed(1)}s  ${(size / 1024).toFixed(0)} KB  YAVG=${st.yavg} spread=${spread.toFixed(0)} (${st.ylow}..${st.yhigh})  ${drawn ? "DRAWN" : "BLANK"}`,
   );
-  results.push({ f, ok: drawn, secs, size, ...st });
+  results.push({ f, ok: drawn, secs, size, ...st, spread });
 }
 
 const good = results.filter((r) => r.ok);
