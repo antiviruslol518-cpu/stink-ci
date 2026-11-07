@@ -46,7 +46,9 @@ export const LOOK: Record<"day" | "golden", WorldLook> = {
   day: {
     // depth.md 2.2: horizon #9fb6e6 just above the skyline, upper sky #5e93d9 at ~20 deg (grade: frame top #5997e2)
     sky: { c: ["#b8d0ec", "#9cbfea", "#6a9fe0", "#4f8cdb", "#3373cc"], e: [0, 3, 8, 16, 40] },
-    water: { near: "#22a7b6", mid: "#167fb2", far: "#1a5596", crest: "#7ddfe8", trough: "#0e4a80", glint: "#ffffff", shade: [0.5, 0.56, 0.72] },
+    // The Thames in 1858 is not a blue river. Sludge: olive-brown near, warmer ochre mid,
+    // dull grey-green far, no bright glint (a sludge surface does not sparkle).
+    water: { near: "#6b5a3c", mid: "#7a6540", far: "#8a7a58", crest: "#9c8757", trough: "#4a3f2c", glint: "#cbb894", shade: [0.48, 0.46, 0.42] },
     cloud: { lit: "#fbf8f1", mid: "#e1e5f3", shade: "#c3cbe9" },
     bounce: [0, 0, 0],
     sat: 1.08,
@@ -55,7 +57,7 @@ export const LOOK: Record<"day" | "golden", WorldLook> = {
     // sunset, not dusk: #ffd08a horizon, peach/orange through ~10 deg, warm rose at 20, muted warm mauve only near the top
     // (the golden grade adds ~+11/255 blue to shadows/mids, so these lean warm)
     sky: { c: ["#ffc47c", "#f7ae78", "#e8967c", "#c4848e", "#8a6f8a"], e: [0, 4, 10, 20, 40] },
-    water: { near: "#1e3a6e", mid: "#355f96", far: "#d4a48e", crest: "#d9a088", trough: "#16294f", glint: "#ffe2b0", shade: [0.42, 0.46, 0.72] },
+    water: { near: "#5e4f36", mid: "#6d5a3c", far: "#8f7a58", crest: "#a08a5e", trough: "#3d3324", glint: "#d8c49c", shade: [0.44, 0.42, 0.40] },
     cloud: { lit: "#ffd2a8", mid: "#f2a08f", shade: "#a98fc4" },
     bounce: [0.04, 0.02, 0.0],
     sat: 1.1,

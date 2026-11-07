@@ -11,9 +11,13 @@ import { LIGHTS, LOOK, LightPreset } from "./lights";
 import { TONE, CHAR, LFB, twoTone, untone } from "./shade";
 import { NOINK } from "./ink";
 import { Pool, Actor, Fx, stage, snapFx, splashFx, creakFx, SIGN_AT, SU_SWING } from "./cast";
+import { palace, terrace, farBank, sewer, PARLIAMENT } from "./parliament";
 import { FPS, D0, SHOTS, PARK, ANCHOR, SNAP, camAt, bridgeState, deckY, dropW, shapeZ, snapEnd, front, BridgeState, V3, smooth, FOREGROUND, ShotDef } from "./story";
 
 // ---------------- assets ----------------
+/** Build the template's suspension bridge + town? OFF for the Great Stink — see the set
+ *  block in the constructor. Flip to true to get the bridge short's set back. */
+const TEMPLATE_SET = false;
 const KENNEY = ["tree_oak", "tree_default", "tree_detailed", "tree_fat", "tree_cone", "tree-high-round", "tree", "plant_bushLarge", "plant_bushDetailed",
   "plant_bush", "hedge", "flower_redA", "flower_yellowA", "flower_purpleA", "grass_large", "grass", "lily_large", "lantern", "cart", "stall-red",
   "stall-green", "stall-bench", "banner-red", "banner-green", "windmill", "canoe"];
@@ -92,7 +96,7 @@ export class World {
   private pool = new Pool();
   private actors: Actor[] = [];
   private fxs: Fx[] = [];
-  private swing: Actor;
+  private swing!: Actor;
   private hemi: THREE.HemisphereLight; private sun: THREE.DirectionalLight; private fill: THREE.DirectionalLight;
   private sky: THREE.Mesh; private skyMat: THREE.ShaderMaterial;
   private fog = new THREE.Fog("#bccbec", 25, 420);
@@ -101,10 +105,10 @@ export class World {
   private sunCache = new Map<number, THREE.Vector3>();
   private cloudMaps: Record<"day" | "golden", THREE.Texture[]>;
   private fgs: { o: THREE.Object3D; a: number; b: number }[] = [];
-  private deckTop: THREE.BufferGeometry; private deckSide: THREE.BufferGeometry;
-  private posts: THREE.InstancedMesh; private hangers: THREE.InstancedMesh; private ribs: THREE.InstancedMesh; private bunting: THREE.InstancedMesh;
+  private deckTop!: THREE.BufferGeometry; private deckSide!: THREE.BufferGeometry;
+  private posts!: THREE.InstancedMesh; private hangers!: THREE.InstancedMesh; private ribs!: THREE.InstancedMesh; private bunting!: THREE.InstancedMesh;
   private rails: Strand[] = []; private chains: Strand[] = []; private stays: Strand[] = [];
-  private boltA: THREE.Mesh; private boltB: THREE.Mesh; private eye: THREE.Mesh;
+  private boltA!: THREE.Mesh; private boltB!: THREE.Mesh; private eye!: THREE.Mesh;
   private flags: THREE.Mesh[] = [];
   private smoke: { m: THREE.Mesh; mat: THREE.MeshLambertMaterial; top: V3; k: number }[] = [];
   private clouds: THREE.Mesh[] = [];
@@ -167,6 +171,10 @@ export class World {
     M.wood = lam("wood", () => ({ map: beam() }));
     M.bed = lam("bed", () => ({ map: bed() }));
     M.sand = lam("sand", () => ({ color: "#e2c992" }));
+    // TEMPLATE SET — the suspension bridge and its town. Kept intact (and compilable) so the
+    // bridge story can be rebuilt from this file, but OFF for the Great Stink: the film is
+    // set on the Westminster riverfront, not on a bridge.
+    if (TEMPLATE_SET) {
     for (const s of [-1, 1]) {
       const zn = s * 30, zf = s * 900;
       b.add(s < 0 ? quadUp(-900, 900, zf, zn, 450, 217.5) : quadUp(-900, 900, zn, zf, 450, 217.5), M.grass);
@@ -215,8 +223,19 @@ export class World {
     b.add(beamBetween(V(PARK[0], D0 + 3.0, PARK[2] - 2.35), V(PARK[0], D0 + 3.0, PARK[2] + 2.35), 0.17), M.wood);
     const sandG = new THREE.CircleGeometry(3.4, 32); sandG.rotateX(-Math.PI / 2);
     b.add(sandG, M.sand, new THREE.Matrix4().makeTranslation(PARK[0], D0 + 0.012, PARK[2]));
+    } // end TEMPLATE_SET
+    // ---- the set: Westminster riverfront, not the bridge ----
+    // The template's bridge/town geometry is left in the file but not built here: the film
+    // needs a terrace, a gothic palace, a sludge river and a brick sewer. Building the
+    // town as well would put an unrelated village behind the Palace.
+    const PM: Mats = { ...M };
+    PM.brick = lam("brickHD", () => ({ map: stoneHD("brickHD", ["#8a5a44", "#7d4f3b", "#95634c", "#734837"], "#5d3a2c") }));
+    PM.brickDark = lam("brickDark", () => ({ color: "#5a382b" }));
+    terrace(b, PM);
+    palace(b, PM, PARLIAMENT.QUAY + 4, { lit: 1, lime: false });
+    farBank(b, PM);
+    sewer(b, PM);
     b.build(R);
-    buildTown(R, kit, sightLines());
 
     // water: its own mesh so the ripples can drift
     // river: depression-angle gradient + sparse marks (textures.md 5.2 #4), sun visibility captured for the bridge shadow
@@ -245,6 +264,9 @@ export class World {
     R.add(wm);
 
     // ---- bridge (dynamic) ----
+    // Also part of the template set: the deck, hangers, chains, flags, sign and swing.
+    // Nothing in the Great Stink is a suspension bridge.
+    if (TEMPLATE_SET) {
     this.deckTop = new THREE.BufferGeometry();
     this.deckTop.setAttribute("position", new THREE.BufferAttribute(new Float32Array(NZ * 2 * 3), 3));
     this.deckTop.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(NZ * 2 * 3), 3));
@@ -316,6 +338,7 @@ export class World {
     this.sign.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
     R.add(this.sign);
     this.swing = new Actor(R, swingGeo);
+    } // end TEMPLATE_SET (dynamic bridge)
     // the CAM agent's near framing objects: built once, never passed through the sight-line filter, toggled per frame
     for (const fg of FOREGROUND) {
       const o = kitClone(kit, fg.kit, fg.s ?? 1);
@@ -398,8 +421,12 @@ export class World {
     // ---- foreground framing objects: inside their frames AND their own shot (so a crossfade layer never shows them) ----
     for (const g of this.fgs) g.o.visible = f >= g.a && f < g.b && g.a < s.b && g.b > s.a;
     // ---- bridge ----
+    // Skipped entirely when the template set is off: every member below is built only
+    // inside `if (TEMPLATE_SET)`, so touching them would throw.
+    if (TEMPLATE_SET) {
     this.poseBridge(b, t, tau, id);
     this.sign.visible = id >= 14;
+    }
     for (const sm of this.smoke) {
       const u = (t * 0.11 + sm.k) % 1, sz = 3 + u * 9;
       sm.m.position.set(sm.top[0] - u * 18, sm.top[1] + u * 13 + u * u * 4, sm.top[2] + u * 3);
@@ -423,8 +450,8 @@ export class World {
     const used: Actor[] = [];
     for (const p of st.places) {
       const sc2 = p.scale ?? 1;
-      if (p.geo !== "swing" && !this.frustum.intersectsSphere(this.sph.set(this.v.set(p.x, p.y + 1.1 * sc2, p.z), 3.5))) continue;
-      const a = p.geo === "swing" ? this.swing : this.actor(ai++);
+      if (!(p.geo === "swing" && TEMPLATE_SET) && !this.frustum.intersectsSphere(this.sph.set(this.v.set(p.x, p.y + 1.1 * sc2, p.z), 3.5))) continue;
+      const a = p.geo === "swing" && TEMPLATE_SET ? this.swing : this.actor(ai++);
       const [w, h, k] = p.size ?? [300, 500, 0.5];
       a.r = this.pool.req(p.key, w, h, k, p.draw);
       a.mesh.visible = true;
@@ -432,11 +459,11 @@ export class World {
       a.mesh.rotation.set(0, p.yaw ?? Math.atan2(cam.position.x - p.x, cam.position.z - p.z), p.roll ?? 0);
       a.mesh.scale.set(p.mirror ? -sc2 : sc2, sc2, sc2);
       if (a.mat.emissiveMap) a.mat.emissive.set(tint); // legacy emissive card until the CHAR agent's cardShade lands
-      a.mesh.castShadow = p.geo === "swing" ? true : L.actorShadow; // day: soft contact blobs instead (CHAR agent)
+      a.mesh.castShadow = p.geo === "swing" && TEMPLATE_SET ? true : L.actorShadow; // day: soft contact blobs instead (CHAR agent)
       used.push(a);
     }
     for (let i = ai; i < this.actors.length; i++) this.actors[i].mesh.visible = false;
-    if (!used.includes(this.swing)) this.swing.mesh.visible = false;
+    if (TEMPLATE_SET && !used.includes(this.swing)) this.swing.mesh.visible = false;
     let fi = 0;
     const fused: Fx[] = [];
     for (const p of st.fx) {

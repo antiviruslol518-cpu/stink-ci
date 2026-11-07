@@ -121,6 +121,11 @@ await renderMedia({
   chromiumOptions: opts,
   timeoutInMilliseconds: 900000,
   logLevel: "warn",
+  // MUTED IS NOT OPTIONAL for chunked rendering. Remotion writes a silent AAC track
+  // whose length does not match the video (a 2.000 s video gets a 2.048 s track). Two
+  // such chunks concatenated with -c copy leave a 48 ms hole at the join and a bogus
+  // frame rate. The real audio is muxed once at the end, so strip it here.
+  muted: true,
   onProgress,
   onBrowserLog,
   onLog: (l) => {

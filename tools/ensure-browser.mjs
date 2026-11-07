@@ -30,25 +30,12 @@ function tryCli() {
   }
 }
 
-function tryPlaywright() {
-  try {
-    execFileSync("npx", ["--yes", "playwright@1.49.0", "install", "--with-deps", "chromium"], { stdio: "inherit" });
-    return true;
-  } catch (e) {
-    say(`playwright install failed: ${String(e.message || e).slice(0, 160)}`);
-    return false;
-  }
-}
-
 let found = findChrome();
 if (!found) {
   say("no chrome found, trying Remotion's downloader");
   if (!(await tryApi())) {
     say("falling back to the Remotion CLI");
-    if (!tryCli()) {
-      say("falling back to playwright");
-      tryPlaywright();
-    }
+    tryCli();
   }
   found = findChrome();
 }

@@ -46,6 +46,9 @@ for (const f of frames) {
     browserExecutable: be,
     chromiumOptions: opts,
     scale: Number(process.env.STILL_SCALE || 0.5),
+    // The first still pays shader compile for the whole post chain. Remotion's default
+    // page-function timeout is 30 s, which a three.js scene blows past on software WebGL.
+    timeoutInMilliseconds: Number(process.env.STILL_TIMEOUT_MS || 180000),
   });
   const size = fs.statSync(out).size;
   // A BLANK frame costs the same bytes as a drawn one — but a near-empty PNG (tiny size

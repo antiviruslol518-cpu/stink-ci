@@ -25,21 +25,37 @@ for c in "$@"; do
   [ -f "$c" ] || { echo "stitch: missing chunk $c"; exit 1; }
   n=$(nframes "$c")
   d=$(ndur "$c")
-  echo "  chunk $(basename "$c")  ${n} frames  ${d}s"
+  # A chunk carrying an audio stream breaks the join: Remotion's silent AAC track is a
+  # different length from its video, which leaves a hole at every seam. Chunks must be
+  # muted; verify rather than assume.
+  A=$(ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "$c")
+  [ -z "$A" ] || { echo "stitch: $c HAS an audio stream — chunks must be rendered muted"; exit 1; }
+  # Dimensions and timebase must agree across chunks, or concat silently produces a file
+  # whose frame count looks right and whose frames are the wrong size or timestamp.
+  D=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$c")
+  TB=$(ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of csv=p=0 "$c")
+  echo "  chunk $(basename "$c")  ${n} frames  ${d}s  ${D}  tb=${TB}"
+  if [ -z "${FIRST_D:-}" ]; then FIRST_D="$D"; FIRST_TB="$TB"; fi
+  [ "$D" = "$FIRST_D" ] || { echo "stitch: resolution mismatch ($D vs $FIRST_D) — refusing to join"; exit 1; }
+  [ "$TB" = "$FIRST_TB" ] || { echo "stitch: timebase mismatch ($TB vs $FIRST_TB) — refusing to join"; exit 1; }
   TOTAL=$((TOTAL + n))
-  # concat demuxer needs an absolute path and single-quoted escaping
   printf "file '%s'\n" "$(cd "$(dirname "$c")" && pwd)/$(basename "$c")" >> /tmp/concat.txt
 done
 echo "  expected total: ${TOTAL} frames"
 
 echo "== stream-copy concat"
-ffmpeg -y -v error -f concat -safe 0 -i /tmp/concat.txt -c copy -movflags +faststart "$OUT"
+# -video_track_timescale pins the output timebase so every chunk lands on the same clock.
+ffmpeg -y -v error -f concat -safe 0 -i /tmp/concat.txt \
+  -c copy -video_track_timescale 90000 -movflags +faststart "$OUT"
 
 GOT=$(nframes "$OUT")
 echo "  concat produced: ${GOT} frames"
 
 if [ "$GOT" = "$TOTAL" ]; then
-  echo "stitch: OK (lossless stream copy, ${GOT} frames)"
+  # frame count alone is NOT proof: a mismatched-timebase join can report the right count
+  # and still have timestamps that jump. Check the duration against frames/fps too.
+  FDUR=$(ndur "$OUT")
+  echo "stitch: OK (lossless stream copy, ${GOT} frames, ${FDUR}s)"
   exit 0
 fi
 

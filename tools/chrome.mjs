@@ -11,6 +11,7 @@
 //   EXTRA_CHROME_ARGS  extra flags, space separated
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 const globDirs = (root, suffix) => {
   try {
@@ -20,32 +21,46 @@ const globDirs = (root, suffix) => {
   }
 };
 
+/** A path is only a candidate if the binary actually RUNS. A file that exists and
+ *  segfaults (seen: Remotion's download on a bleeding-edge kernel) is worse than no
+ *  browser at all, because the error surfaces as "Failed to launch the browser process"
+ *  three layers deep. `--version` is cheap and exits. */
+function runs(p) {
+  try {
+    if (!fs.statSync(p).isFile()) return false;
+    const r = spawnSync(p, ["--version"], { timeout: 20000, encoding: "utf8" });
+    if (r.status !== 0) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function findChrome() {
   const home = process.env.HOME || "";
   const candidates = [
     process.env.CHROME,
+    // system installs first on a workstation: a distro-packaged Chrome is built against
+    // this machine's glibc and libs, while Remotion's prebuilt shell may not be.
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    // Remotion's own pinned download — this is what `npx remotion browser ensure` fills,
+    // and the only one Remotion 4.0.210 uses by default. On CI this is the right one.
+    path.join(process.cwd(), "node_modules/.remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell"),
+    ...globDirs(path.join(process.cwd(), "node_modules/.remotion/chrome-headless-shell/linux64"), "chrome-headless-shell"),
     // playwright cache (the original skill's assumption)
     ...globDirs(path.join(home, ".cache/ms-playwright"), "chrome-linux/headless_shell"),
     ...globDirs(path.join(home, ".cache/ms-playwright"), "chrome-linux/chrome"),
-    // Remotion's own download (what `npx remotion browser ensure` populates)
-    path.join(home, ".cache/remotion/chrome-headless-shell/linux64/chrome-headless-shell"),
-    path.join(home, ".cache/remotion/chrome-headless-shell/linux64/chrome-headless-shell-linux64/chrome-headless-shell"),
-    ...globDirs(path.join(home, ".cache/remotion"), "chrome-headless-shell-linux64/chrome-headless-shell"),
     // the old /opt layout on the author's box
     "/opt/browser/chrome-headless-shell-linux64/chrome-headless-shell",
-    // system installs (apt / ubuntu-latest images)
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
   ].filter(Boolean);
-  return candidates.find((p) => {
-    try {
-      return fs.statSync(p).isFile();
-    } catch {
-      return false;
-    }
-  });
+  for (const p of candidates) {
+    if (!runs(p)) continue;
+    return p;
+  }
+  return undefined;
 }
 
 const SOFTWARE_GL = new Set(["swangle", "swiftshader"]);
@@ -53,15 +68,16 @@ const SOFTWARE_GL = new Set(["swangle", "swiftshader"]);
 export function chromiumOptions() {
   const gl = process.env.GL || "angle-egl";
   const extra = (process.env.EXTRA_CHROME_ARGS || "").split(/\s+/).filter(Boolean);
+  // NOTE (verified against remotion 4.0.210 source): ChromiumOptions has NO `args` field.
+  // open-browser.ts never spreads it, so the flags below are SILENTLY DROPPED. They are
+  // kept because newer Remotion honours them and they cost nothing, but do not rely on
+  // them: the real defence against WebGL context eviction is concurrency=1, which is why
+  // the workflow renders each chunk with a single browser tab.
   const args = [
     "--no-sandbox",
     "--disable-dev-shm-usage",
     "--home=/tmp",
-    // Chrome caps LIVE WebGL contexts at 8 and silently evicts the oldest -> permanently
-    // blank canvas. A crossfade mounts a SECOND canvas. Never remove this.
     "--max-active-webgl-contexts=64",
-    // Chrome falls back to SwiftShader after a few GPU crashes, silently changing
-    // rasterizer mid-render. A multi-hour render must not do that.
     "--disable-gpu-process-crash-limit",
   ];
   if (SOFTWARE_GL.has(gl)) {
