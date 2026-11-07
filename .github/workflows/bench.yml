@@ -1,0 +1,49 @@
+name: bench-2k
+
+# Measures real swangle throughput at 2K on a GitHub runner. This is the number that
+# decides how many chunks the film needs: at 6 h/job, frames-per-job = 21600 / s_per_frame.
+on:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        conc: ["1", "4"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
+            libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+            libcairo2 fonts-liberation libasound2t64
+      - run: npm ci --no-audit --no-fund
+      - run: node tools/ensure-browser.mjs
+      - name: nproc
+        run: nproc && free -g | head -2 && df -h / | tail -1
+      - name: bench 8 frames @ 2K conc=${{ matrix.conc }}
+        env:
+          GL: swangle
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+          LOG: out/bench_${{ matrix.conc }}.log
+        run: |
+          mkdir -p out
+          /usr/bin/time -v node tools/render.mjs out/bench_${{ matrix.conc }}.mp4 0 7 1.3333333333333333 16 ${{ matrix.conc }} 2>&1 | tee out/bench_${{ matrix.conc }}.txt
+          ffprobe -v error -select_streams v:0 -show_entries stream=width,height,nb_frames -of csv=p=0 out/bench_${{ matrix.conc }}.mp4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.conc }}
+          path: out/bench_${{ matrix.conc }}.*
+          retention-days: 3
