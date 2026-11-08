@@ -123,19 +123,44 @@ const dolly = (pos: V3, look: V3, k: number, rest: Partial<Cam> = {}): Shot =>
 // standing on the terrace and anything below 30 is over the water. The palace front is a flat
 // 26 m wall: any camera pointed at it from further than ~20 m renders stone, so every shot that
 // needs the palace keeps the river or the cast in front of it.
-const S1a = (f: number) => dolly([0, 11.5, 34], [0, 9.0, -22], pushK(f, 0, 0.0020), { fov: 50 });
-const S1b = (f: number) => dolly([1.2, 11.0, 32], [0.4, 8.4, -16], pushK(f, 40, 0.0024), { fov: 44, roll: -0.015 });
+// Shot 1 is the only INTERIOR in the film, and it is built to the line: "you are standing
+// inside the British Parliament, and you cannot breathe." The camera stands at the back of the
+// chamber on the central aisle, at standing eye height, looking down the benches at the window.
+// The window is the whole point — it is the only light, and through it is the river. Standing
+// height (D0 + 1.65) is what makes the room feel like a room rather than a model.
+// The camera stands well back (z = 35, twelve metres from the glass) and HIGH — 2.2 m above the
+// chamber floor — because the frame has to hold the window, and the water in it, together with
+// enough bench to say "this is a room". Measured with tools/sightlines.mjs: this framing puts
+// 29 % water, 23 % wall, 22 % tracery and 26 % sky through the glass. Lower and the benches fill
+// the bottom third; higher and the sill cuts the river off.
+const CH = { CX: 150, Z1: 47, Z0: 31 };
+const S1a = (f: number) => dolly([CH.CX, 8.2, 35], [CH.CX, 7.8, 18], pushK(f, 0, 0.0016), { fov: 58 });
+const S1b = (f: number) => dolly([CH.CX + 0.9, 8.1, 33], [CH.CX - 0.3, 7.8, 16], pushK(f, 40, 0.0019), { fov: 52, roll: -0.015 });
 // Shot 2: the reveal — the Palace from across the river, water in the foreground
 const S2a = (f: number) => dolly([0, 26, -26], [0, 13, 48], pushK(f, 77, 0.0016), { fov: 46 });
 const S2b = (f: number) => dolly([-7, 23, -38], [2, 15, 48], pushK(f, 140, 0.0016), { fov: 44, roll: 0.015 });
 // Shot 3: the city from above — the far bank's roofs and chimneys, the river beyond
-const S3a = (f: number) => dolly([0, 42, -130], [0, 12, -60], pushK(f, 220, 0.0013), { fov: 46 });
-const S3b = (f: number) => dolly([-14, 38, -122], [4, 13, -56], pushK(f, 280, 0.0015), { fov: 44, roll: -0.015 });
+// Shot 3 is "two and a half million people ... empties into a single river." The old framing was
+// 40 m up over the far bank looking DOWN at rooftops: 50 % of the frame was one roof plane and
+// the river was 1 %. The city without the river is the wrong picture — the sentence is about the
+// city draining INTO the water. So the camera is now 55 m up and back on the far side, looking
+// across the rooftops at the Thames: 26 % tower, 22 % water, 15 % wall, 31 % sky, mean depth 123 m.
+const S3a = (f: number) => dolly([-100, 55, -65], [50, -2, 5], pushK(f, 220, 0.0013), { fov: 50 });
+const S3b = (f: number) => dolly([-115, 50, -50], [35, -2, 15], pushK(f, 280, 0.0015), { fov: 52, roll: -0.015 });
 // Shot 4: down on the water — "The Thames. It is not water anymore."
-const S4a = (f: number) => dolly([0, 1.3, 16], [0, 0.6, -30], pushK(f, 344, 0.0018), { fov: 46 });
+// Shot 4 is "The Thames. It is not water anymore." The old camera stood on the terrace and
+// looked ACROSS the river, which put 40 % embankment wall in the frame and made the water a
+// distant brown band. Now it skims the surface looking ALONG the river: 47 % water, 44 % sky,
+// 8 % wall, and a third of the frame within 6 m, which is close enough for the flotsam to read
+// as debris rather than as noise.
+const S4a = (f: number) => dolly([-50, 1.2, -4], [90, 0.8, -10], pushK(f, 344, 0.0018), { fov: 56 });
 // Shot 5: low over the sludge looking up at the Palace — "built directly beside it"
-const S5a = (f: number) => dolly([14, 2.4, -6], [0, 14, 48], pushK(f, 407, 0.0014), { fov: 46 });
-const S5b = (f: number) => dolly([9, 2.8, -16], [1, 13, 48], pushK(f, 490, 0.0018), { fov: 44, roll: 0.02 });
+// Shot 5 is "It is untreated sewage ... Parliament was built directly beside it." Both halves
+// have to be in frame: the sludge AND the building. Low over the water at x = 16 looking back
+// at the palace gives 23 % water, 33 % wall, 14 % tower — the only framing that holds the
+// relation the sentence is making.
+const S5a = (f: number) => dolly([16, 3.0, -14], [0, 12, 48], pushK(f, 407, 0.0014), { fov: 50 });
+const S5b = (f: number) => dolly([20, 3.2, -22], [2, 12, 48], pushK(f, 490, 0.0018), { fov: 46, roll: 0.02 });
 // Shot 6: the Members with handkerchiefs — medium group, the palace windows behind them
 const S6a = (f: number) => dolly([0, 8.4, 29.5], [0, 7.3, 40], pushK(f, 560, 0.0018), { fov: 50 });
 const S6b = (f: number) => dolly([-1.2, 8.1, 31.0], [-0.4, 7.4, 40], pushK(f, 630, 0.0016), { fov: 46, roll: -0.02 });

@@ -209,6 +209,117 @@ export function sludgeMaterial() {
 }
 
 /**
+ * What floats on the Thames in 1858.
+ *
+ * The water shader gives a coloured surface with sparse crest marks, which at close range is a
+ * flat brown plane: it reads as mud, not as sewage. The narration for shot 4 is "It is not water
+ * anymore. It is untreated sewage" — so the surface needs THINGS on it, at a believable scale.
+ *
+ * Placed in a deterministic scatter over the near half of the river (z = -8 .. 29), which is what
+ * every river camera looks at. Sizes are small (0.3-1.6 m) and they sit only 0.02-0.18 m proud of
+ * the water, so they read as debris riding the surface rather than as objects on a floor.
+ */
+export function flotsam(b: Batch, M: Record<string, THREE.Material>) {
+  const raft = lam("raft", () => ({ color: "#6a5942" }));
+  const rag = lam("rag", () => ({ color: "#8a8272" }));
+  // deterministic hash: the same river every frame, so a still and a render agree
+  const h = (i: number, s: number) => {
+    const v = Math.sin(i * 127.1 + s * 311.7) * 43758.5453;
+    return v - Math.floor(v);
+  };
+  for (let i = 0; i < 70; i++) {
+    const x = -85 + h(i, 1) * 170;
+    const z = -8 + h(i, 2) * 37;
+    const w = 0.3 + h(i, 3) * 1.3;
+    const d = 0.25 + h(i, 4) * 0.9;
+    const y = 0.02 + h(i, 5) * 0.16;
+    const m = h(i, 6) > 0.55 ? rag : raft;
+    b.add(boxGeo(V(x, y, z), V(x + w, y + 0.07 + h(i, 7) * 0.1, z + d), 0), m);
+  }
+  // a few larger mats of weed / scum that read at 20-40 m
+  for (let i = 0; i < 14; i++) {
+    const x = -80 + h(i + 40, 8) * 160;
+    const z = -6 + h(i + 40, 9) * 34;
+    const w = 2.2 + h(i + 40, 10) * 4.0;
+    b.add(boxGeo(V(x, 0.015, z), V(x + w, 0.055, z + w * 0.55), 0), rag);
+  }
+}
+
+/**
+ * THE CHAMBER — the inside of Parliament, which the film opens on.
+ *
+ * Shot 1 says "you are standing inside the British Parliament, and you cannot breathe". The
+ * exterior set cannot show that: from any terrace camera the palace is a flat 26 m wall, and
+ * the frame reads as stone. So the film needs a room, and there was not one.
+ *
+ * It is built as a free-standing box beside the terrace rather than cut into the palace,
+ * because the palace is a solid merged block: a camera inside it would be inside geometry.
+ * The chamber sits at x = 138..162, out of every other shot's frustum, and its window is on
+ * the -z side so that looking out of it shows the real river and the real far bank.
+ *
+ * The composition it is built for: dark walls, green benches receding down a central aisle,
+ * and one huge pointed window full of hazy light with the sludge river beyond it. That single
+ * image carries all three of the shot's beats — interior, oppression, and the river.
+ */
+export const CHAMBER = {
+  X0: 138, X1: 162,      // along the river
+  Z0: 31, Z1: 47,        // Z0 is the window wall, Z1 the back wall
+  Y0: D0, Y1: D0 + 14,   // floor and ceiling
+  WX0: 146, WX1: 154,    // window opening
+  // The sill runs almost to the floor on purpose. The camera stands 14 m back at eye height,
+  // and the water is 7.65 m below it: the near bank of the river sits about 27 deg down, which
+  // is the bottom edge of a 56 deg frame. Any higher sill and every ray through the glass goes
+  // UP — the window fills with sky and the river, which is the reason the shot exists, is never
+  // in frame. Floor-to-spring glass is also what a Victorian river frontage actually had.
+  SILL: D0 + 0.25,       // bottom of the glass
+  SPRING: D0 + 9.0,      // where the arch starts to turn
+  APEX: D0 + 12.5,       // the point
+  CX: 150,
+};
+
+export function chamber(b: Batch, M: Record<string, THREE.Material>) {
+  const C = CHAMBER;
+  const { X0, X1, Z0, Z1, Y0, Y1, WX0, WX1, SILL, SPRING, APEX, CX } = C;
+  const IN = V(0, 0, 1);   // the room's interior faces look toward +z (the camera at the back)
+  const UP2 = V(0, 1, 0);
+
+  // floor + ceiling
+  b.add(face(V(X0, Y0, Z0), V(X1, Y0, Z0), V(X1, Y0, Z1), V(X0, Y0, Z1), UP2), M.wood);
+  b.add(face(V(X0, Y1, Z0), V(X1, Y1, Z0), V(X1, Y1, Z1), V(X0, Y1, Z1), V(0, -1, 0)), M.tower);
+
+  // back wall and side walls, all facing into the room
+  b.add(face(V(X0, Y0, Z1), V(X1, Y0, Z1), V(X1, Y1, Z1), V(X0, Y1, Z1), V(0, 0, -1)), M.wall);
+  b.add(face(V(X0, Y0, Z0), V(X0, Y0, Z1), V(X0, Y1, Z1), V(X0, Y1, Z0), V(1, 0, 0)), M.wall);
+  b.add(face(V(X1, Y0, Z0), V(X1, Y0, Z1), V(X1, Y1, Z1), V(X1, Y1, Z0), V(-1, 0, 0)), M.wall);
+
+  // ---- the window wall: piers, sill, and a pointed arch head ----
+  // The opening is cut by building the wall AROUND it in five pieces. A hole is not a thing
+  // you can add; the absence of wall is.
+  b.add(face(V(X0, Y0, Z0), V(WX0, Y0, Z0), V(WX0, Y1, Z0), V(X0, Y1, Z0), IN), M.wall);   // left pier
+  b.add(face(V(WX1, Y0, Z0), V(X1, Y0, Z0), V(X1, Y1, Z0), V(WX1, Y1, Z0), IN), M.wall);   // right pier
+  b.add(face(V(WX0, Y0, Z0), V(WX1, Y0, Z0), V(WX1, SILL, Z0), V(WX0, SILL, Z0), IN), M.wall); // under the glass
+  // the two head pieces meet at the apex, so the top of the opening is a point
+  b.add(face(V(WX0, SPRING, Z0), V(CX, APEX, Z0), V(CX, Y1, Z0), V(WX0, Y1, Z0), IN), M.wall);
+  b.add(face(V(CX, APEX, Z0), V(WX1, SPRING, Z0), V(WX1, Y1, Z0), V(CX, Y1, Z0), IN), M.wall);
+
+  // tracery: a mullion and two sub-arches, so the opening reads as gothic glass, not a hole
+  b.add(boxGeo(V(CX - 0.22, SILL, Z0 - 0.3), V(CX + 0.22, SPRING + 1.2, Z0 + 0.1), 2), M.cope);
+  b.add(boxGeo(V(WX0, SILL - 0.5, Z0 - 0.5), V(WX1, SILL, Z0 + 0.2), 2), M.cope);   // sill ledge
+
+  // ---- benches: two green banks down a central aisle, the Commons silhouette ----
+  const bench = lam("benchGreen", () => ({ color: "#2f4a34" }));
+  for (let r = 0; r < 7; r++) {
+    const z = Z0 + 3.0 + r * 1.75;
+    for (const [bx0, bx1] of [[X0 + 1.5, CX - 2.0], [CX + 2.0, X1 - 1.5]] as const) {
+      b.add(boxGeo(V(bx0, Y0, z), V(bx1, Y0 + 0.55, z + 1.1), 2), bench);          // seat
+      b.add(boxGeo(V(bx0, Y0 + 0.55, z + 0.85), V(bx1, Y0 + 1.25, z + 1.1), 2), bench); // back
+    }
+  }
+  // a hint of gilt on the back wall — one warm line, nothing that needs reading
+  b.add(boxGeo(V(X0 + 2, Y0 + 8.2, Z1 - 0.35), V(X1 - 2, Y0 + 8.7, Z1 - 0.1), 2), M.cope);
+}
+
+/**
  * The one set of numbers the camera, the cast and the QA tool all agree on.
  * TERRACE_Z is where the cast stands; PALACE_Z is where the building starts.
  */

@@ -10,7 +10,7 @@ import { LIGHTS, LOOK, LightPreset } from "./lights";
 import { TONE, CHAR, LFB, twoTone, untone } from "./shade";
 import { NOINK } from "./ink";
 import { Pool, Actor, Fx, stage, burstFx } from "./cast";
-import { palace, terrace, farBank, sewer, PARLIAMENT } from "./parliament";
+import { palace, terrace, farBank, sewer, chamber, flotsam, PARLIAMENT } from "./parliament";
 import { FPS, D0, SHOTS, camAt, V3, FOREGROUND, ShotDef } from "./story";
 
 // ---------------- assets ----------------
@@ -129,6 +129,8 @@ export class World {
     palace(b, PM, PARLIAMENT.PALACE_Z, { lit: 1, lime: false });
     farBank(b, PM);
     sewer(b, PM);
+    chamber(b, PM);
+    flotsam(b, PM);
     b.build(R);
 
     // water: its own mesh so the ripples can drift

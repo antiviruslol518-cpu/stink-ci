@@ -23,6 +23,14 @@ const arg = (k, d) => { const i = process.argv.indexOf("--" + k); return i > 0 ?
 const GRID = arg("grid", "16x9").split("x").map(Number);
 const AT = Number(arg("at", "0.5"));       // 0 = shot start, 1 = shot end
 const ONLY = arg("shots", "").split(",").filter(Boolean).map(Number);
+// --cam "x,y,z>x,y,z,fov[,roll]" judges a CANDIDATE framing without touching story.ts.
+// Repeatable: every candidate is scored and printed as its own row, so a camera can be
+// searched for in one run instead of one 15-minute stills round per idea.
+const CAMS = process.argv.reduce((acc, a, i) => {
+  if (a === "--cam" && process.argv[i + 1]) acc.push(process.argv[i + 1]);
+  return acc;
+}, []);
+const CROWD = arg("crowd", "");            // crowd type to include for --cam candidates
 
 const load = async (rel) => {
   const r = await build({ entryPoints: [path.resolve(rel)], bundle: true, write: false, format: "esm", platform: "neutral", target: "es2020", logLevel: "silent" });
@@ -78,6 +86,8 @@ parl.terrace(b, M);
 parl.palace(b, M, parl.PARLIAMENT.PALACE_Z, { lit: 1, lime: false });
 parl.farBank(b, M);
 parl.sewer(b, M);
+parl.chamber(b, M);
+parl.flotsam(b, M);
 const meshes = b.meshes();
 
 // the river surface: world.ts adds it as its own quad at y = 0 spanning z = -30..30
@@ -96,14 +106,13 @@ const personGeo = new THREE.CylinderGeometry(0.32, 0.32, 1.75, 8);
 personGeo.translate(0, 0.875, 0);
 const personMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
 
-function addCast(id, f) {
+function castFor(crowd, id) {
   let list;
-  const s = story.SHOTS[id - 1];
-  if (s.crowd === "mps") list = marks.mpMarks(id === 11);
-  else if (s.crowd === "debate") list = marks.debateMarks();
-  else if (s.crowd === "intake") list = marks.stepsMarks();
-  else if (s.crowd === "folk") list = marks.folkMarks(9, marks.TERRACE_Z + 0.4, 1.8, 30);
-  else if (s.crowd === "labourers") list = marks.labourerMarks();
+  if (crowd === "mps") list = marks.mpMarks(id === 11);
+  else if (crowd === "debate") list = marks.debateMarks();
+  else if (crowd === "intake") list = marks.stepsMarks();
+  else if (crowd === "folk") list = marks.folkMarks(9, marks.TERRACE_Z + 0.4, 1.8, 30);
+  else if (crowd === "labourers") list = marks.labourerMarks();
   else return [];
   return list.map((p) => {
     const m = new THREE.Mesh(personGeo, personMat);
@@ -115,6 +124,7 @@ function addCast(id, f) {
     return m;
   });
 }
+const addCast = (id, f) => castFor(story.SHOTS[id - 1].crowd, id);
 
 const scene = new THREE.Scene();
 for (const m of meshes) scene.add(m);
@@ -130,47 +140,40 @@ function shoot(origin, dir) {
 }
 
 const fmt = (x) => (x < 10 ? x.toFixed(1) : String(Math.round(x)));
-const rows = [];
 
-for (const s of story.SHOTS) {
-  if (ONLY.length && !ONLY.includes(s.id)) continue;
-  const f = Math.round(s.a + (s.b - s.a) * AT);
-  const c = story.camAt(s.id, f);
+/** Score one camera against the set (+ the people this shot would have). */
+function score(c, people, label) {
   const cam = new THREE.PerspectiveCamera(c.fov, 9 / 16, 0.2, 1500); // portrait: 1080x1920
   cam.position.set(...c.pos);
   cam.up.set(0, 1, 0);
   cam.lookAt(...c.look);
-  cam.rotateZ(c.roll);
+  cam.rotateZ(c.roll ?? 0);
   cam.updateMatrixWorld(true);
 
-  const tally = new Map();
-  let sky = 0, near = 0, sumD = 0, n = 0;
-  // people only for THIS shot: they are what the frame is about
-  const people = addCast(s.id, f);
   for (const p of people) scene.add(p);
   const targets = meshes.concat(people);
-  const shootHere = (origin, dir) => {
-    ray.set(origin, dir);
-    const hits = ray.intersectObjects(targets, false);
-    return hits.length ? { name: hits[0].object.name, d: hits[0].distance } : null;
-  };
+  const tally = new Map();
+  let sky = 0, near = 0, sumD = 0, n = 0;
   for (let iy = 0; iy < GRID[1]; iy++) {
     for (let ix = 0; ix < GRID[0]; ix++) {
       const ndc = new THREE.Vector2(((ix + 0.5) / GRID[0]) * 2 - 1, -(((iy + 0.5) / GRID[1]) * 2 - 1));
       const v = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(cam).sub(cam.position).normalize();
-      const h = shootHere(cam.position, v);
-      if (!h) { sky++; continue; }
+      ray.set(cam.position, v);
+      const hits = ray.intersectObjects(targets, false);
+      if (!hits.length) { sky++; continue; }
+      const h = hits[0];
       n++;
-      sumD += h.d;
-      if (h.d < 6) near++;
-      tally.set(h.name, (tally.get(h.name) || 0) + 1);
+      sumD += h.distance;
+      if (h.distance < 6) near++;
+      tally.set(h.object.name, (tally.get(h.object.name) || 0) + 1);
     }
   }
   for (const p of people) scene.remove(p);
+
   const cells = GRID[0] * GRID[1];
   const top = [...tally.entries()].sort((a, c2) => c2[1] - a[1])[0] || ["-", 0];
-  rows.push({
-    id: s.id, f,
+  return {
+    id: label,
     pos: c.pos.map(fmt).join(","),
     top: top[0], topPct: (top[1] / cells) * 100,
     people: ((tally.get("PERSON") || 0) / cells) * 100,
@@ -179,7 +182,24 @@ for (const s of story.SHOTS) {
     near: (near / cells) * 100,
     mean: n ? sumD / n : 0,
     sets: [...tally.entries()].sort((a, c2) => c2[1] - a[1]).map(([k, v]) => `${k}:${Math.round((v / cells) * 100)}`).join(" "),
-  });
+  };
+}
+
+const rows = [];
+
+for (const s of story.SHOTS) {
+  if (ONLY.length && !ONLY.includes(s.id)) continue;
+  const f = Math.round(s.a + (s.b - s.a) * AT);
+  rows.push({ ...score(story.camAt(s.id, f), addCast(s.id, f), String(s.id)), f });
+}
+
+// ---- candidate framings (--cam "x,y,z>x,y,z,fov[,roll]") --------------------------------
+for (const spec of CAMS) {
+  const [p, l] = spec.split(">");
+  const pos = p.split(",").map(Number);
+  const [lx, ly, lz, fov, roll] = l.split(",").map(Number);
+  const people = CROWD ? castFor(CROWD, story.SHOTS.find((s) => s.crowd === CROWD)?.id ?? 1) : [];
+  rows.push({ ...score({ pos, look: [lx, ly, lz], fov, roll: roll || 0 }, people, "cand"), f: "-" });
 }
 
 const pad = (x, w) => String(x).padStart(w);

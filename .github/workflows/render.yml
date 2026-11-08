@@ -254,14 +254,31 @@ jobs:
           sudo apt-get install -y -qq ffmpeg python3-pip
           pip install --quiet numpy scipy pillow || pip3 install --quiet --break-system-packages numpy scipy pillow
 
-      - name: mix audio
+      # The mix is BUILT here, not looked for. The old step only muxed a public/mix.wav that
+      # nothing ever produced, so every render gated a silent video and the audio checks in
+      # qa-gate could never pass. mix.py synthesizes the score and the sound design from the
+      # same timeline.py the picture uses, then masters to -15 LUFS / -1.2 dBTP.
+      - name: build the mix (voice + score + sound design)
         run: |
-          if [ -f public/mix.wav ]; then
-            bash tools/mux.sh out/video_silent.mp4 public/mix.wav out/video.mp4
-          else
-            echo "::warning::no public/mix.wav — gating the silent video. Duration/word checks still apply."
-            cp out/video_silent.mp4 out/video.mp4
-          fi
+          cd src/videos/stink/audio
+          python3 mix.py 2>&1 | tee ../../../../out/mix.log
+          test -s mix.wav || { echo "::error::mix.py did not produce mix.wav"; exit 1; }
+          ffprobe -v error -show_entries format=duration -show_entries stream=sample_rate,channels \
+            -of default=noprint_wrappers=1 mix.wav
+
+      - name: mux audio onto the silent video
+        run: |
+          bash tools/mux.sh out/video_silent.mp4 src/videos/stink/audio/mix.wav out/video.mp4
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mix
+          path: |
+            src/videos/stink/audio/mix.wav
+            src/videos/stink/audio/cues.md
+            out/mix.log
+          retention-days: 14
 
       - name: "THE GATE — qa-gate decides if this is finished"
         run: |
