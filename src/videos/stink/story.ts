@@ -109,45 +109,63 @@ const dolly = (pos: V3, look: V3, k: number, rest: Partial<Cam> = {}): Shot =>
   ({ pos: [look[0] + (pos[0] - look[0]) * k, look[1] + (pos[1] - look[1]) * k, look[2] + (pos[2] - look[2]) * k], look, ...rest });
 
 // ---- framings (f -> camera); each pushes in from the frame its key starts ----
-// Shot 1: at the open window. The lens sits just inside the terrace balustrade, 6 m up, looking out
-// over the sludge toward the far bank — the air the Members are breathing.
-const S1a = (f: number) => dolly([2.0, 12.2, 33.2], [0, 1.6, -26], pushK(f, 0, 0.0022), { fov: 46 });
-const S1b = (f: number) => dolly([1.0, 12.0, 33.0], [0, 1.2, -18], pushK(f, 40, 0.0025), { fov: 40, roll: -0.02 });
-// Shot 2: the reveal — high over the river, both banks and the Palace in one frame
-const S2a = (f: number) => dolly([0, 24, -14], [0, 9, 40], pushK(f, 77, 0.0018), { fov: 46 });
-const S2b = (f: number) => dolly([-6, 20, -24], [0, 10, 42], pushK(f, 140, 0.0018), { fov: 44, roll: 0.02 });
-// Shot 3: the city from above — roofs, chimneys, a million drains
-const S3a = (f: number) => dolly([-10, 42, -70], [0, 5, 10], pushK(f, 220, 0.0015), { fov: 46 });
-const S3b = (f: number) => dolly([0, 36, -58], [0, 4, 6], pushK(f, 280, 0.0018), { fov: 44, roll: -0.02 });
-// Shot 4: down on the water — "The Thames"
-const S4a = (f: number) => dolly([4, 1.4, 24], [0, 0.5, -30], pushK(f, 344, 0.002), { fov: 44 });
+//
+// GEOMETRY FIRST. The frame is 1080x1920 portrait, so three.js `fov` is VERTICAL and the
+// horizontal field is only about 0.56 of it: fov 46 gives a 27-degree-wide window. That single
+// fact decides every camera in this film:
+//
+//   * a 1.8 m person fills 40 % of the frame height only from about 6 m away;
+//   * a group spanning 10 m needs about 20 m of distance at fov 55;
+//   * therefore crowd shots are made from OVER THE RIVER, looking back at the terrace, and
+//     close-ups are made from ON the terrace, 5-8 m from the face.
+//
+// The terrace runs z = 30 (parapet) .. 48 (palace front), so a camera between those numbers is
+// standing on the terrace and anything below 30 is over the water. The palace front is a flat
+// 26 m wall: any camera pointed at it from further than ~20 m renders stone, so every shot that
+// needs the palace keeps the river or the cast in front of it.
+const S1a = (f: number) => dolly([0, 11.5, 34], [0, 9.0, -22], pushK(f, 0, 0.0020), { fov: 50 });
+const S1b = (f: number) => dolly([1.2, 11.0, 32], [0.4, 8.4, -16], pushK(f, 40, 0.0024), { fov: 44, roll: -0.015 });
+// Shot 2: the reveal — the Palace from across the river, water in the foreground
+const S2a = (f: number) => dolly([0, 26, -26], [0, 13, 48], pushK(f, 77, 0.0016), { fov: 46 });
+const S2b = (f: number) => dolly([-7, 23, -38], [2, 15, 48], pushK(f, 140, 0.0016), { fov: 44, roll: 0.015 });
+// Shot 3: the city from above — the far bank's roofs and chimneys, the river beyond
+const S3a = (f: number) => dolly([0, 42, -130], [0, 12, -60], pushK(f, 220, 0.0013), { fov: 46 });
+const S3b = (f: number) => dolly([-14, 38, -122], [4, 13, -56], pushK(f, 280, 0.0015), { fov: 44, roll: -0.015 });
+// Shot 4: down on the water — "The Thames. It is not water anymore."
+const S4a = (f: number) => dolly([0, 1.3, 16], [0, 0.6, -30], pushK(f, 344, 0.0018), { fov: 46 });
 // Shot 5: low over the sludge looking up at the Palace — "built directly beside it"
-const S5a = (f: number) => dolly([12, 2.2, -8], [0, 13, 34], pushK(f, 407, 0.0016), { fov: 46 });
-const S5b = (f: number) => dolly([8, 2.6, -14], [0, 12, 34], pushK(f, 490, 0.002), { fov: 42, roll: 0.03 });
-// Shot 6: the Members on the terrace with handkerchiefs
-const S6a = (f: number) => dolly([-5, 7.6, 26.5], [-2, 7.5, 33], pushK(f, 560, 0.0022), { fov: 44 });
-const S6b = (f: number) => dolly([-2.5, 7.5, 27.5], [0, 7.5, 33], pushK(f, 630, 0.002), { fov: 38, roll: -0.03 });
+const S5a = (f: number) => dolly([14, 2.4, -6], [0, 14, 48], pushK(f, 407, 0.0014), { fov: 46 });
+const S5b = (f: number) => dolly([9, 2.8, -16], [1, 13, 48], pushK(f, 490, 0.0018), { fov: 44, roll: 0.02 });
+// Shot 6: the Members with handkerchiefs — medium group, the palace windows behind them
+const S6a = (f: number) => dolly([0, 8.4, 29.5], [0, 7.3, 40], pushK(f, 560, 0.0018), { fov: 50 });
+const S6b = (f: number) => dolly([-1.2, 8.1, 31.0], [-0.4, 7.4, 40], pushK(f, 630, 0.0016), { fov: 46, roll: -0.02 });
 // Shot 7: the emptied terrace — "strong enough to empty a debating chamber"
-const S7a = (f: number) => dolly([0, 12, 18], [0, 8, 38], pushK(f, 706, 0.0015), { fov: 46 });
-// Shot 8: the water's edge — London drinking
-const S8a = (f: number) => dolly([9, 3.4, 23], [-1, 2.4, 31], pushK(f, 840, 0.0018), { fov: 44 });
-const S8b = (f: number) => dolly([6, 2.8, 25], [0, 2.2, 32], pushK(f, 910, 0.002), { fov: 40, roll: 0.025 });
-// Shot 9: the debate — "three million pounds in eighteen days"
-const S9a = (f: number) => dolly([-5, 7.8, 26], [-1, 7.5, 35], pushK(f, 988, 0.002), { fov: 44 });
-const S9b = (f: number) => dolly([-1, 7.7, 27], [1, 7.5, 34], pushK(f, 1060, 0.0022), { fov: 38, roll: -0.025 });
-// Shot 10: INSIDE THE SEWER — the brick barrel vault, travelling down the tunnel
-const S10a = (f: number) => dolly([-30, -11.2, 1.2], [12, -12.4, 0], pushK(f, 1148, 0.0012), { fov: 50 });
-const S10b = (f: number) => dolly([-24, -11.4, 1.0], [16, -12.6, -0.4], pushK(f, 1250, 0.0015), { fov: 46, roll: 0.02 });
+const S7a = (f: number) => dolly([0, 16, 2], [0, 7, 40], pushK(f, 706, 0.0013), { fov: 48 });
+// Shot 8: the water's edge — London drawing water from the same river. The queue stands on the
+// stone steps (y ~ 4.9, z ~ 28.4), so the camera looks DOWN at them from just above the parapet;
+// aiming at the terrace instead would put the whole queue under the bottom edge of the frame.
+const S8a = (f: number) => dolly([5.5, 8.6, 21.5], [0, 5.9, 28.6], pushK(f, 840, 0.0014), { fov: 48 });
+const S8b = (f: number) => dolly([3.2, 8.3, 23.5], [0.2, 5.9, 28.6], pushK(f, 910, 0.0016), { fov: 42, roll: 0.02 });
+// Shot 9: the debate — "three million pounds in eighteen days". Eight Members arguing, shot from
+// ON the terrace at their own height; the palace is the background, not the subject.
+const S9a = (f: number) => dolly([0, 8.6, 27], [0, 7.4, 40], pushK(f, 988, 0.0016), { fov: 56 });
+const S9b = (f: number) => dolly([-2, 8.4, 29], [0.5, 7.5, 40], pushK(f, 1060, 0.0018), { fov: 50, roll: -0.02 });
+// Shot 10: INSIDE THE SEWER — the brick barrel vault, the navvies working in the lantern light.
+// The tunnel is 10.4 m across and 70 m long. The camera starts 11 m back down the axis and travels
+// in; the look point is at BODY height (y ~ -13.2), not at the tunnel axis — aimed at the axis the
+// rays pass over their heads and the shot is 85 % brick with six men under the bottom edge.
+const S10a = (f: number) => dolly([-8, -11.2, 1.0], [6, -13.3, 0.2], pushK(f, 1148, 0.0012), { fov: 52 });
+const S10b = (f: number) => dolly([-4, -11.3, 0.9], [7, -13.4, -0.1], pushK(f, 1250, 0.0014), { fov: 48, roll: 0.018 });
 // Shot 11: close on a Member — "the smell itself was the poison. It was not."
-const S11a = (f: number) => dolly([0, 7.65, 27.5], [0, 7.55, 33], pushK(f, 1353, 0.0025), { fov: 36 });
+const S11a = (f: number) => dolly([0, 7.9, 33.5], [0, 7.6, 40], pushK(f, 1353, 0.0020), { fov: 40 });
 // Shot 12: people breathing, alive — "the foul air was not spreading disease"
-const S12a = (f: number) => dolly([-9, 8.2, 24], [3, 7.4, 36], pushK(f, 1464, 0.0018), { fov: 46 });
-const S12b = (f: number) => dolly([-5, 8.0, 26], [2, 7.4, 34], pushK(f, 1560, 0.002), { fov: 42, roll: -0.02 });
-// Shot 13: the river, golden — "carried the filth out of the city"
-const S13a = (f: number) => dolly([0, 9, -22], [0, 5, 40], pushK(f, 1646, 0.0015), { fov: 46 });
+const S12a = (f: number) => dolly([0, 9.0, 28], [0, 7.5, 40], pushK(f, 1464, 0.0015), { fov: 56 });
+const S12b = (f: number) => dolly([-3, 8.8, 31], [0.8, 7.6, 40], pushK(f, 1560, 0.0017), { fov: 48, roll: -0.018 });
+// Shot 13: the river, golden — "carried the filth out of the city, and the smell with it"
+const S13a = (f: number) => dolly([0, 10, -26], [0, 6, 48], pushK(f, 1646, 0.0014), { fov: 46 });
 // Shot 14: the final pull-back — "London was saved by a mistake"
-const S14a = (f: number) => dolly([0, 15, -34], [0, 11, 40], pushK(f, 1752, 0.001), { fov: 46 });
-const S14b = (f: number) => dolly([0, 20, -52], [0, 12, 40], pullK(f, 1820, 0.0012), { fov: 50 });
+const S14a = (f: number) => dolly([0, 16, -20], [0, 12, 48], pushK(f, 1752, 0.0010), { fov: 46 });
+const S14b = (f: number) => dolly([0, 30, -60], [0, 14, 48], pullK(f, 1820, 0.0011), { fov: 50 });
 
 const CAMS: Record<number, Key[]> = {
   1: [

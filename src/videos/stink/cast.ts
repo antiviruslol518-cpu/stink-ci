@@ -10,6 +10,8 @@ import {
   Outfit, Expr, FrontOpts, SideOpts,
 } from "./toon";
 import { FPS, D0, SHOTS, V3, clamp01 } from "./story";
+import { PARLIAMENT } from "./parliament";
+import { mpMarks, folkMarks, debateMarks, labourerMarks, stepsMarks } from "./marks";
 import { NOINK } from "./ink";
 import { cardShade, blobMaterial, CARD_K } from "./cardshade";
 
@@ -214,74 +216,85 @@ const blob = (out: Stage, x: number, y: number, z: number, sc = 1, k = 1) => {
 // ---------------- crowd by shot ----------------
 export type Stage = { places: Place[]; fx: FxPlace[] };
 
-/** where a group of people stands: on the terrace behind the parapet, feet at D0 */
+/**
+ * Where a group of people stands: on the terrace, feet at D0, at the depth the set defines.
+ *
+ * This MUST come from parliament.ts rather than being a literal. The first draft hardcoded
+ * z = 33.2 while the palace front was at z = 33 — the cast stood inside the building and five
+ * shots rendered as flat stone. One constant, shared, is the fix.
+ */
 const TERRACE_Y = D0;
+const TERRACE_Z = PARLIAMENT.TERRACE_Z;
 
-type Person = { i: number; x: number; z: number; expr: Expr; look?: number; mode?: "stand" | "stroll" | "sit"; prop?: FrontOpts["prop"]; scale?: number; yaw?: number };
+type Person = { i: number; x: number; z: number; y?: number; expr: Expr; look?: number; mode?: "stand" | "stroll" | "sit"; prop?: FrontOpts["prop"]; scale?: number; yaw?: number };
 
 /** draw one character at (x, TERRACE_Y, z) with the light and view resolved from the camera */
 const put = (cam: CamInfo, t: number, out: Stage, p: Person) => {
   const o = outfitOf(p.i);
   const fo: FrontOpts = { mode: p.mode ?? "stand", expr: p.expr, look: p.look ?? 0, blink: lidAt(t, p.i), prop: p.prop ?? null };
-  out.places.push({ ...person(cam, { i: p.i, o, okey: `v${vOf(p.i)}` }, p.x, TERRACE_Y, p.z, { side: false, mirror: false }, fo, {}), yaw: p.yaw });
-  blob(out, p.x, TERRACE_Y, p.z, p.scale ?? 1);
+  const y = p.y ?? TERRACE_Y;   // the steps sit below the terrace
+  out.places.push({ ...person(cam, { i: p.i, o, okey: `v${vOf(p.i)}` }, p.x, y, p.z, { side: false, mirror: false }, fo, {}), yaw: p.yaw });
+  blob(out, p.x, y, p.z, p.scale ?? 1);
 };
 
 /**
  * Shot 6 & 11: Members of Parliament on the terrace, handkerchiefs to their faces, the windows open
- * behind them. They are arranged in a shallow arc so no two faces overlap from either camera.
+ * behind them. Positions come from marks.ts so the sight-line tool sees the same arrangement.
  */
 const mps = (cam: CamInfo, t: number, out: Stage, close: boolean) => {
-  const n = close ? 3 : 7;
-  for (let i = 0; i < n; i++) {
-    const k = i - (n - 1) / 2;
-    const x = close ? k * 1.15 : k * 1.9;
-    const z = 33.2 + Math.abs(k) * 0.45;
+  for (const m of mpMarks(close)) {
     // the handkerchief is the beat: it lifts to the face on a slow 2.6 s cycle, out of phase per Member
-    const hk = (t * 0.385 + i * 0.31) % 1;
+    const hk = (t * 0.385 + (m.i - 10) * 0.31) % 1;
     const raised = hk > 0.35 && hk < 0.85;
-    const expr: Expr = i % 3 === 0 ? "nervous" : i % 3 === 1 ? "stern" : "pained";
-    put(cam, t, out, { i: i + 10, x, z, expr, look: Math.round(Math.sin(t * 0.7 + i) * 0.8), prop: raised ? ["hammer", 0] : null });
+    const expr: Expr = m.i % 3 === 0 ? "nervous" : m.i % 3 === 1 ? "stern" : "pained";
+    put(cam, t, out, { i: m.i, x: m.x, z: m.z, expr, look: Math.round(Math.sin(t * 0.7 + (m.i - 10)) * 0.8), prop: raised ? ["hammer", 0] : null });
   }
 };
 
 /** Shot 8 & 12: ordinary Londoners — a queue at the water's edge, then a crowd just breathing */
-const folk = (cam: CamInfo, t: number, out: Stage, n: number, z0: number, spread: number) => {
-  for (let i = 0; i < n; i++) {
-    const k = i - (n - 1) / 2;
-    const x = k * spread + (hh(i, 2) - 0.5) * 0.4;
-    const z = z0 + (hh(i, 3) - 0.5) * 1.4;
-    const expr: Expr = (["dazed", "pained", "relief", "neutral", "smile_closed"] as Expr[])[i % 5];
-    put(cam, t, out, { i: i + 30, x, z, expr, look: Math.round(Math.sin(t * 0.5 + i * 1.7) * 1.2) });
+const folk = (cam: CamInfo, t: number, out: Stage, n: number, z0: number, spread: number, base: number) => {
+  for (const m of folkMarks(n, z0, spread, base)) {
+    const expr: Expr = (["dazed", "pained", "relief", "neutral", "smile_closed"] as Expr[])[(m.i - base) % 5];
+    put(cam, t, out, { i: m.i, x: m.x, z: m.z, expr, look: Math.round(Math.sin(t * 0.5 + (m.i - base) * 1.7) * 1.2) });
   }
 };
 
 /** Shot 9: the debate — a cluster of Members, arms up, arguing. They sway and jab on a 1.4 s beat. */
 const debate = (cam: CamInfo, t: number, out: Stage) => {
-  for (let i = 0; i < 8; i++) {
-    const k = i - 3.5;
-    const x = k * 1.55, z = 33.0 + Math.abs(k) * 0.55;
+  for (const m of debateMarks()) {
+    const i = m.i - 50;
     const beat = Math.sin(t * 4.5 + i * 1.1);
     const expr: Expr = i % 2 ? "stern" : beat > 0.3 ? "shock" : "grin";
-    put(cam, t, out, { i: i + 50, x, z, expr, look: Math.round(Math.sin(t * 1.6 + i) * 1.2), prop: beat > 0.55 ? ["hammer", 0] : null });
+    put(cam, t, out, { i: m.i, x: m.x, z: m.z, expr, look: Math.round(Math.sin(t * 1.6 + i) * 1.2), prop: beat > 0.55 ? ["hammer", 0] : null });
   }
 };
 
 /** Shot 10: navvies inside the sewer — crouched, working, lantern light. They sit low so the vault reads. */
 const labourers = (cam: CamInfo, t: number, out: Stage) => {
-  const Y = -14;
-  for (let i = 0; i < 5; i++) {
-    const x = -6 + i * 3.0, z = (i % 2 ? 1 : -1) * 1.5;
+  for (const m of labourerMarks()) {
+    const i = m.i - 70;
     const swing = Math.sin(t * 2.2 + i * 0.9);
     const expr: Expr = swing > 0 ? "stern" : "neutral";
-    const o = outfitOf(i + 70);
-    const fo: FrontOpts = { mode: "sit", expr, blink: lidAt(t, i + 70), look: 0 };
-    out.places.push(person(cam, { i: i + 70, o, okey: `v${vOf(i + 70)}` }, x, Y, z, { side: false, mirror: false }, fo, {}));
+    const o = outfitOf(m.i);
+    const fo: FrontOpts = { mode: "sit", expr, blink: lidAt(t, m.i), look: 0 };
+    out.places.push(person(cam, { i: m.i, o, okey: `v${vOf(m.i)}` }, m.x, m.y, m.z, { side: false, mirror: false }, fo, {}));
     // dust motes in the lantern light
     if (i % 2 === 0) {
       const u = (t * 0.35 + hh(i, 6)) % 1;
-      out.fx.push({ key: `puff${q(u, 30)}`, cw: 300, ch: 300, draw: (p) => fxPuff(p, q(u, 30)), x: x + 0.4, y: Y + 0.7 + u * 1.4, z, w: 0.9, h: 0.9, soft: true });
+      out.fx.push({ key: `puff${q(u, 30)}`, cw: 300, ch: 300, draw: (p) => fxPuff(p, q(u, 30)), x: m.x + 0.4, y: m.y + 0.7 + u * 1.4, z: m.z, w: 0.9, h: 0.9, soft: true });
     }
+  }
+};
+
+/** Shot 8: a queue on the stone steps at the river, filling vessels. The steps are the only spot
+ *  at the waterline that a camera over the water can actually see past the parapet. */
+const steps = (cam: CamInfo, t: number, out: Stage) => {
+  for (const m of stepsMarks()) {
+    const i = m.i - 30;
+    const expr: Expr = (["dazed", "pained", "neutral", "relief", "pained", "neutral"] as Expr[])[i % 6];
+    // someone reaches down to the water on a slow cycle
+    const reach = Math.sin(t * 1.1 + i * 1.3) > 0.6;
+    put(cam, t, out, { i: m.i, x: m.x, y: m.y, z: m.z, expr, look: Math.round(Math.sin(t * 0.5 + i * 1.7) * 1.2), mode: reach ? "stroll" : "stand" });
   }
 };
 
@@ -293,8 +306,9 @@ export const stage = (id: number, t: number, cam: CamInfo): Stage => {
   findSun(cam, SUN);
   if (s.crowd === "mps") mps(cam, t, out, id === 11);
   if (s.crowd === "debate") debate(cam, t, out);
-  if (s.crowd === "intake") folk(cam, t, out, 6, 32.6, 1.5);
-  if (s.crowd === "folk") folk(cam, t, out, 9, 34.0, 1.8);
+  // shot 8 is the WATER'S EDGE: the queue stands on the steps, at the river itself
+  if (s.crowd === "intake") steps(cam, t, out);
+  if (s.crowd === "folk") folk(cam, t, out, 9, TERRACE_Z + 0.4, 1.8, 30);
   if (s.crowd === "labourers") labourers(cam, t, out);
   return out;
 };

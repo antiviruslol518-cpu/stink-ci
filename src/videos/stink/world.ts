@@ -126,7 +126,7 @@ export class World {
     PM.brick = lam("brickHD", () => ({ map: stoneHD("brickHD", ["#8a5a44", "#7d4f3b", "#95634c", "#734837"], "#5d3a2c") }));
     PM.brickDark = lam("brickDark", () => ({ color: "#5a382b" }));
     terrace(b, PM);
-    palace(b, PM, PARLIAMENT.QUAY + 4, { lit: 1, lime: false });
+    palace(b, PM, PARLIAMENT.PALACE_Z, { lit: 1, lime: false });
     farBank(b, PM);
     sewer(b, PM);
     b.build(R);
