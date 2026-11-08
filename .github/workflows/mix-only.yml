@@ -1,0 +1,87 @@
+name: mix-only
+
+# Builds the soundtrack on its own, with no render, so a broken mix costs ~5 minutes instead
+# of a 6-hour 2K render. This exists because the gate job builds the mix AFTER stitching a
+# finished picture: if music.py throws, the failure arrives hours late and at full price.
+#
+# Trigger: Actions tab -> mix-only -> Run workflow.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  mix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg python3-pip
+          pip install --quiet numpy scipy || pip3 install --quiet --break-system-packages numpy scipy
+          python3 -c "import numpy, scipy; print('numpy', numpy.__version__, 'scipy', scipy.__version__)"
+
+      - name: build the mix
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd src/videos/stink/audio
+          python3 mix.py 2>&1 | tee "$GITHUB_WORKSPACE/out/mix.log"
+          test -s mix.wav || { echo "::error::mix.py did not produce mix.wav"; exit 1; }
+
+      - name: measure what came out
+        run: |
+          set -euo pipefail
+          cd src/videos/stink/audio
+          ffprobe -v error -show_entries format=duration -show_entries stream=sample_rate,channels,codec_name \
+            -of default=noprint_wrappers=1 mix.wav | tee "$GITHUB_WORKSPACE/out/mix.ffprobe.txt"
+          # the film is 62.5667 s; a mix that is 67.5 s is still the bridge timeline
+          D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 mix.wav)
+          python3 - "$D" <<'PY'
+          import sys
+          d = float(sys.argv[1])
+          print(f"mix duration {d:.4f} s (want 62.5667)")
+          assert abs(d - 62.5667) < 0.05, f"WRONG LENGTH: {d:.4f} s"
+          PY
+          # integrated loudness and true peak, from the file itself
+          ffmpeg -hide_banner -nostats -i mix.wav -af ebur128=peak=true -f null - 2>&1 \
+            | sed -n '/Summary:/,$p' | tee "$GITHUB_WORKSPACE/out/mix.ebur128.txt"
+
+      - name: check the silence at the turn
+        run: |
+          set -euo pipefail
+          cd src/videos/stink/audio
+          # 48.41-52.32 s must be silent. Sample the middle of it and measure with volumedetect,
+          # whose output is one clean "mean_volume: -91.0 dB" line (astats prefixes every line
+          # with its filter address and prints -inf for digital silence, both awkward to parse).
+          ffmpeg -v info -nostats -ss 48.60 -t 3.50 -i mix.wav -af volumedetect -f null - 2>&1 \
+            | grep -E "mean_volume|max_volume" | tee "$GITHUB_WORKSPACE/out/silence.txt"
+          MEAN=$(ffmpeg -nostats -ss 48.60 -t 3.50 -i mix.wav -af volumedetect -f null - 2>&1 \
+            | sed -n 's/.*mean_volume: \(.*\) dB/\1/p')
+          echo "dropout mean volume = $MEAN dB"
+          python3 - "$MEAN" <<'PY'
+          import sys
+          raw = sys.argv[1].strip()
+          # volumedetect reports "-inf" for true digital silence
+          r = float("-inf") if raw.lower().startswith("-inf") else float(raw)
+          assert r < -60, f"the dropout is not silent: mean {raw} dB"
+          print(f"dropout is silent ({raw} dB) — the cut on 'It was not.' holds")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mix-only
+          path: |
+            out/mix.log
+            out/mix.ffprobe.txt
+            out/mix.ebur128.txt
+            out/silence.txt
+            src/videos/stink/audio/cues.md
+            src/videos/stink/audio/mix.wav
+            src/videos/stink/audio/stem_voice.wav
+            src/videos/stink/audio/stem_music.wav
+            src/videos/stink/audio/stem_sfx.wav
+          retention-days: 7
