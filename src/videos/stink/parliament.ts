@@ -143,6 +143,18 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
     const y = D0 - (i + 1) * 1.15;
     b.add(boxGeo(V(-3.2, y, QUAY - 1.0 - i * 1.15), V(3.2, y + 1.15, QUAY - 1.0 - (i + 1) * 1.15), 2), M.cope);
   }
+
+  // Past the palace the bank keeps going, so it needs a skyline of its own. Without this the
+  // extended floor simply ends at z = back and the sky shows underneath it — the same defect
+  // as before, moved one step back. Warehouses and chimneys, built the way farBank builds the
+  // far side, so the near bank reads as the same city rather than as a wharf in open air.
+  for (let i = 0, x = 88; x < BANK_X - 12; i++, x += 24) {
+    const w = 19 + ((i * 7) % 5) * 1.6;
+    const h = 9 + ((i * 5) % 4) * 3.5;
+    b.add(boxGeo(V(x, D0, back - 19), V(x + w, D0 + h, back), 3), M.wall);
+    b.add(boxGeo(V(x - 0.4, D0 + h, back - 19.4), V(x + w + 0.4, D0 + h + 0.9, back + 0.4), 3), M.tower);
+    if (i % 3 === 0) b.add(boxGeo(V(x + w * 0.3, D0 + h, back - 12), V(x + w * 0.3 + 1.4, D0 + h + 5, back - 10.6), 2), M.tower);
+  }
 }
 
 /**
