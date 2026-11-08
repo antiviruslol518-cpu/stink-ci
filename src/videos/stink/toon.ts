@@ -69,6 +69,46 @@ export const townsfolk = (v = 0): Outfit => {
   return v % 2 ? { ...o, hat: "bonnet", dress: ["#d9a441", "#c25a7a", "#5a8fc2"][v % 3] } : { ...o, hat: "tophat" };
 };
 
+// ---------------- 1858 cast ----------------
+// The Great Stink needs three kinds of Victorian Londoner, and each one has to read at 1080x1920 in
+// under a second of screen time, so the silhouette does the work: tall silk hat + dark tailcoat for
+// a Member of Parliament, cap + rough jacket for a navvy, bonnet + full skirt for a woman.
+// Colours are muted 1858 dyes (indigo, madder, coal-soot grey), never modern brights.
+
+/** a Member of Parliament: black silk top hat, dark frock coat, pale cravat */
+export const MP: Outfit = {
+  jacket: "#2b3242", pants: "#333a48", boots: INK, hat: "tophat", buttons: "#c9b06a",
+  belt: null, skin: SKIN, build: "stout",
+};
+
+/** a navvy / labourer: flat cap, coarse brown jacket, clay-stained trousers */
+export const NAVVY: Outfit = {
+  jacket: "#6b5540", pants: "#4a4038", boots: "#2f241c", hat: "cap", cap: "#5a4a38",
+  belt: "#3a2f26", buttons: "#8a7a60", skin: SKINS[3], build: "adult",
+};
+
+/** a Victorian woman: bonnet and a full dark skirt */
+export const WOMAN: Outfit = {
+  jacket: "#4a3550", pants: "#4a3550", boots: "#2f241c", hat: "bonnet", dress: "#5a4152",
+  skin: SKINS[1], build: "adult",
+};
+
+/** the engineer: a good black coat and a top hat, but visibly at work — no sash, no sword */
+export const ENGINEER: Outfit = {
+  jacket: "#242a36", pants: "#2c3340", boots: "#241c18", hat: "tophat", buttons: "#b9a468",
+  belt: "#3a3028", skin: SKINS[2], build: "adult",
+};
+
+/** a sick / exhausted Londoner: no hat, slumped, grey clothes */
+export const SICK: Outfit = {
+  jacket: "#5c5a52", pants: "#4a4842", boots: "#332c26", hat: "hair", hair: "#4a3c30",
+  skin: SKINS[1], build: "adult",
+};
+
+export const MPS = [MP, MP, MP, ENGINEER];
+export const FOLK = [NAVVY, WOMAN, SICK, NAVVY, WOMAN, MP];
+
+
 export class Pen {
   g: CanvasRenderingContext2D;
   ol = 12;

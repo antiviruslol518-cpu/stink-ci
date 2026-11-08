@@ -1,0 +1,116 @@
+name: stills
+
+# Look at the film WITHOUT rendering it.
+#
+# One PNG per shot at half scale costs ~15 minutes of runner time; the full 2K film costs
+# ~30 CPU-hours. Never start the expensive render until these stills read correctly:
+# the set geometry, the face windings, the cast and the grading are all judged here.
+#
+# Every frame below sits INSIDE a shot (never on a cut, never inside a crossfade), so a
+# frame that looks wrong is a real problem, not a transition caught mid-fade.
+#
+# Trigger: Actions tab -> stills -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      frames:
+        description: "Frames to render (comma separated). Empty = one per shot."
+        required: false
+        default: ""
+      scale:
+        description: "Still scale (0.5 = 540x960, 1 = 1080x1920)."
+        required: false
+        default: "0.6"
+      gl:
+        description: "GL backend. swangle is the only one that draws on a GPU-less runner."
+        required: false
+        default: "swangle"
+
+jobs:
+  stills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 fonts-liberation || true
+          sudo apt-get install -y -qq --no-install-recommends libasound2t64 || \
+            sudo apt-get install -y -qq --no-install-recommends libasound2 || true
+          ffmpeg -version | head -1
+
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+
+      - name: get chrome
+        run: node tools/ensure-browser.mjs
+
+      - name: derive shots.json from story.ts
+        run: node tools/emit-shots.mjs shots.json
+
+      - name: "PROBE: prove WebGL draws"
+        env:
+          GL: ${{ github.event.inputs.gl }}
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+        run: |
+          mkdir -p out
+          node tools/probe.mjs 30 300 900 1500 2>&1 | tee out/probe.txt
+          grep -q "RESULT: WebGL draws here" out/probe.txt || {
+            echo "::error::WebGL does not draw on this runner. Stills would all be blank."
+            exit 1
+          }
+
+      - name: render stills
+        env:
+          GL: ${{ github.event.inputs.gl }}
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+          STILL_SCALE: ${{ github.event.inputs.scale }}
+          STILL_TIMEOUT_MS: "300000"
+        run: |
+          FR="${{ github.event.inputs.frames }}"
+          if [ -z "$FR" ]; then
+            # One frame per shot, chosen from shots.json so this list cannot drift from the film.
+            FR=$(node -e '
+              const s = require("./shots.json");
+              // a third of the way into each shot: safely past any crossfade at its head
+              console.log(s.shots.map(q => q.a + Math.floor((q.b - q.a) * 0.35)).join(" "));
+            ')
+          fi
+          echo "frames: $FR"
+          node tools/still.mjs $FR 2>&1 | tee out/stills.txt
+
+      - name: contact sheet
+        run: |
+          # one PNG per shot is easier to judge as a grid than as fourteen separate files
+          ls out/stills/*.png | head -20 > /tmp/list.txt
+          ffmpeg -y -v error -pattern_type glob -i 'out/stills/*.png' \
+            -filter_complex "scale=360:-1,tile=5x4:padding=6:margin=6:color=white" \
+            -frames:v 1 out/contact.png || true
+          ls -la out/stills/ out/contact.png 2>/dev/null | head -25
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stills
+          path: |
+            out/stills/*.png
+            out/contact.png
+            out/stills.txt
+            out/probe.txt
+          if-no-files-found: warn
+          retention-days: 14
