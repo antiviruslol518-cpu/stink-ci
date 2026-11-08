@@ -260,8 +260,12 @@ jobs:
       # same timeline.py the picture uses, then masters to -15 LUFS / -1.2 dBTP.
       - name: build the mix (voice + score + sound design)
         run: |
-          cd src/videos/stink/audio
-          python3 mix.py 2>&1 | tee ../../../../out/mix.log
+          # pipefail: without it a crashing mix.py is masked by tee succeeding, and the job
+          # would carry on to mux a stale or absent wav.
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cd "$GITHUB_WORKSPACE/src/videos/stink/audio"
+          python3 mix.py 2>&1 | tee "$GITHUB_WORKSPACE/out/mix.log"
           test -s mix.wav || { echo "::error::mix.py did not produce mix.wav"; exit 1; }
           ffprobe -v error -show_entries format=duration -show_entries stream=sample_rate,channels \
             -of default=noprint_wrappers=1 mix.wav
