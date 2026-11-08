@@ -230,6 +230,10 @@ jobs:
       # of the film already exists as artifacts on the earlier run, and because the fix
       # removed only a non-rendering prop, those frames are pixel-identical. Pull them into
       # the SAME dl/ tree; the stitch below sorts by index and cannot tell them apart.
+      #
+      # This is the step a 3-hour run would be lost to if it went wrong, so it FAILS LOUDLY
+      # rather than shrugging: a swallowed error here surfaces later as a confusing
+      # "chunk-N artifact has no chunk_N.mp4" or, worse, a short film.
       - name: pull the untouched chunks from the prior run
         if: github.event.inputs.prior_run != ''
         env:
@@ -239,12 +243,22 @@ jobs:
           set -euo pipefail
           mkdir -p dl
           HAVE=$(ls -d dl/chunk-* 2>/dev/null | sed 's#.*/chunk-##' | sort -n || true)
-          echo "already have: ${HAVE:-<none>}"
-          for i in $(seq 0 99); do
+          echo "this run produced: ${HAVE:-<none>}"
+          # ask the prior run what it actually has, instead of guessing a range
+          WANT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/artifacts" \
+                   --paginate -q '.artifacts[].name' | sed -n 's/^chunk-//p' | sort -n)
+          echo "prior run has: $(echo $WANT)"
+          [ -n "$WANT" ] || { echo "::error::prior run $RUN has no chunk-* artifacts"; exit 1; }
+          PULLED=0
+          for i in $WANT; do
             case " $HAVE " in *" $i "*) continue;; esac
-            # no-op for indices that never existed; the artifact name simply won't match
-            gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n "chunk-$i" -D "dl/chunk-$i" 2>/dev/null || true
+            if gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n "chunk-$i" -D "dl/chunk-$i"; then
+              PULLED=$((PULLED + 1))
+            else
+              echo "::error::failed to download chunk-$i from run $RUN"; exit 1
+            fi
           done
+          echo "pulled $PULLED chunk(s) from run $RUN"
           echo "after pull:"; ls -d dl/chunk-* | sed 's#.*/chunk-##' | sort -n | tr '\n' ' '; echo
 
       - name: stitch
