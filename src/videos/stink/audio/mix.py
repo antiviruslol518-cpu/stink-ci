@@ -16,7 +16,25 @@ from dsp import (SR, ns, st, dbg, read_wav, write_wav, integrated, momentary, mo
 import timeline as T
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+# The voice lives in <repo>/voice/, produced by tools/make_voice.py run from the repo root.
+# Counting directories up from this file hard-codes the depth and silently breaks if the audio
+# package moves, so search upward for the folder that actually contains voice.wav instead.
+def _find_voice_root(start):
+    d = start
+    for _ in range(6):
+        if os.path.isfile(os.path.join(d, "voice", "voice.wav")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    raise FileNotFoundError(
+        "voice/voice.wav not found above " + start +
+        " — run tools/make_voice.py from the repo root to generate it"
+    )
+
+
+ROOT = _find_voice_root(HERE)
 CACHE = os.path.join(HERE, "_cache")
 N = ns(T.DUR)                    # 3,003,200 samples = 62.5667 s
 TARGET_LUFS = -15.0
