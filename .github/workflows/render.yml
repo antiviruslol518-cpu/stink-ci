@@ -48,6 +48,14 @@ concurrency:
   group: render-${{ github.ref }}
   cancel-in-progress: false
 
+# The stitch job downloads another RUN's artifacts when prior_run is set, which the default
+# token cannot do: artifacts are scoped to the run, and `gh run download <other-run>` needs
+# actions:read. Declaring it here is the difference between a 2-hour recovery and a
+# permission error at the last step.
+permissions:
+  contents: read
+  actions: read
+
 env:
   NODE_OPTIONS: --max-old-space-size=8192
 
