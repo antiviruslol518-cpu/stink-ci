@@ -35,6 +35,14 @@ on:
         description: "If true, stop after the WebGL probe (no render)."
         required: false
         default: "false"
+      only_chunks:
+        description: "Optional. Comma-separated chunk indices to render, e.g. '0,9,14'. Empty = all. The matrix is the same plan, so indices keep their frame ranges."
+        required: false
+        default: ""
+      prior_run:
+        description: "Optional run id to take the chunks only_chunks did NOT render from, e.g. 42494165817."
+        required: false
+        default: ""
 
 concurrency:
   group: render-${{ github.ref }}
@@ -89,6 +97,8 @@ jobs:
 
       - name: plan chunks
         id: plan
+        env:
+          ONLY: ${{ github.event.inputs.only_chunks }}
         run: |
           N="${{ github.event.inputs.chunks }}"
           TOTAL=$(node -e "const s=require('fs').readFileSync('src/videos/stink/story.ts','utf8');const m=s.match(/export const TOTAL = (\d+)/);console.log(m?m[1]:'')")
@@ -97,11 +107,19 @@ jobs:
           echo "chunks: $N"
           MAP=$(bash tools/plan-chunks.sh "$TOTAL" "$N" | node -e '
             const lines=require("fs").readFileSync(0,"utf8").trim().split("\n").filter(Boolean);
-            const inc=lines.map(l=>{const[i,a,b]=l.split(/\s+/).map(Number);return{i,a,b};});
+            let inc=lines.map(l=>{const[i,a,b]=l.split(/\s+/).map(Number);return{i,a,b};});
+            // only_chunks: re-render a subset without changing the plan. The index still
+            // maps to the same frame range, so a subset chunk stitches with the others.
+            const only=(process.env.ONLY||"").split(",").map(s=>s.trim()).filter(Boolean).map(Number);
+            if(only.length){
+              inc=inc.filter(c=>only.includes(c.i));
+              if(inc.length!==only.length){console.error("::error::only_chunks names an index outside the plan");process.exit(1);}
+            }
             console.log(JSON.stringify({include:inc}));
           ')
           echo "matrix=$MAP" >> "$GITHUB_OUTPUT"
           echo "chunks=$N" >> "$GITHUB_OUTPUT"
+          echo "only_chunks: ${ONLY:-<all>}"
           echo "$MAP" | head -c 500
 
       - uses: actions/upload-artifact@v4
@@ -183,7 +201,10 @@ jobs:
 
   stitch:
     needs: [prep, render]
-    if: github.event.inputs.probe_only != 'true'
+    # always(): a chunk failing must not silently skip the stitch — otherwise a 2-hour run
+    # ends with no diagnostic at all. The stitch proves completeness itself below, so a
+    # missing chunk still fails loudly, just with a useful message.
+    if: always() && github.event.inputs.probe_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -196,6 +217,27 @@ jobs:
         with:
           pattern: chunk-*
           path: dl
+
+      # A subset re-render (only_chunks) produces only the chunks it was asked for. The rest
+      # of the film already exists as artifacts on the earlier run, and because the fix
+      # removed only a non-rendering prop, those frames are pixel-identical. Pull them into
+      # the SAME dl/ tree; the stitch below sorts by index and cannot tell them apart.
+      - name: pull the untouched chunks from the prior run
+        if: github.event.inputs.prior_run != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.event.inputs.prior_run }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          HAVE=$(ls -d dl/chunk-* 2>/dev/null | sed 's#.*/chunk-##' | sort -n || true)
+          echo "already have: ${HAVE:-<none>}"
+          for i in $(seq 0 99); do
+            case " $HAVE " in *" $i "*) continue;; esac
+            # no-op for indices that never existed; the artifact name simply won't match
+            gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n "chunk-$i" -D "dl/chunk-$i" 2>/dev/null || true
+          done
+          echo "after pull:"; ls -d dl/chunk-* | sed 's#.*/chunk-##' | sort -n | tr '\n' ' '; echo
 
       - name: stitch
         run: |
@@ -216,6 +258,18 @@ jobs:
           done)
           echo "chunks in order:"; echo "$CHUNKS"
           [ -n "$CHUNKS" ] || { echo "::error::no chunk artifacts downloaded"; exit 1; }
+          # Prove the set is COMPLETE before joining. stitch.sh only checks that the chunks
+          # it was given join cleanly — it cannot know one is missing from the middle, and a
+          # film with a hole is exactly the silent failure this pipeline exists to prevent.
+          NPLAN=${{ needs.prep.outputs.chunks }}
+          NGOT=$(echo "$CHUNKS" | grep -c . || true)
+          echo "chunks present: $NGOT / $NPLAN"
+          if [ "$NGOT" != "$NPLAN" ]; then
+            MISSING=$(seq 0 $((NPLAN - 1)) | while read i; do
+              ls -d "dl/chunk-$i" >/dev/null 2>&1 || printf "%s " "$i"; done)
+            echo "::error::only $NGOT of $NPLAN chunks are present (missing: $MISSING) — refusing to stitch a film with holes. Re-run the missing chunks with only_chunks."
+            exit 1
+          fi
           bash tools/stitch.sh out/video_silent.mp4 $CHUNKS
 
       - name: concat the render logs
