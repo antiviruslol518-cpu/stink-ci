@@ -60,18 +60,29 @@ const Inner: React.FC<{ id: number; kit: Kit }> = ({ id, kit }) => {
     grade: new GradeEffect(GRADES.day, GRADE_STRENGTH.day),
     grain: new GrainEffect({ amount: 0.025, cellPx: 1.5 }), // film grain, OFF by default (inputProps post.grain): the reference measures no grain and it quadruples the file size
   }), [camera, scene]);
-  useEffect(() => () => fx.ink.dispose(), [fx]);
+  // NOTE: never write `dispose={null}` on a <primitive>. R3F's diffProps only filters the
+  // `object` key for primitives (events-*.esm.js:615), so `dispose` falls through to
+  // applyProps and is assigned onto the instance as an own property — `fx.ink.dispose = null`
+  // — which shadows the class's prototype dispose(). The crossfade unmounts then threw
+  // "fx.ink.dispose is not a function" (frames 81/1153/1650/1756) and killed whole chunks.
+  // The prop was redundant anyway: removeChild sets shouldDispose = !isPrimitive, so a
+  // primitive is never auto-disposed. The explicit cleanup below is the only dispose path.
+  useEffect(() => () => {
+    // one failed dispose must not abort a two-hour chunk: the canvas is going away regardless,
+    // so a leaked target here is harmless, while a thrown error is fatal to the whole render.
+    try { fx.ink.dispose(); } catch (e) { console.warn("InkPass.dispose failed:", e); }
+  }, [fx]);
   // EffectComposer types children as JSX.Element | JSX.Element[], so a conditional `null`
   // does not typecheck. Build the pass list as an array instead of null-gating inline.
   const post = useMemo(() => {
     const passes: JSX.Element[] = [];
-    if (on.ink) passes.push(<primitive key="ink" object={fx.ink} dispose={null} />);
-    if (on.lens && on.pre) passes.push(<primitive key="pre" object={fx.lens.pre} dispose={null} />);
-    if (on.lens) passes.push(<primitive key="lens" object={fx.lens.main} dispose={null} />);
-    if (on.bloom) passes.push(<primitive key="bloom" object={fx.bloom} dispose={null} />);
-    passes.push(<primitive key="tone" object={fx.tone} dispose={null} />);
-    if (on.grade) passes.push(<primitive key="grade" object={fx.grade} dispose={null} />);
-    if (on.grain) passes.push(<primitive key="grain" object={fx.grain} dispose={null} />);
+    if (on.ink) passes.push(<primitive key="ink" object={fx.ink} />);
+    if (on.lens && on.pre) passes.push(<primitive key="pre" object={fx.lens.pre} />);
+    if (on.lens) passes.push(<primitive key="lens" object={fx.lens.main} />);
+    if (on.bloom) passes.push(<primitive key="bloom" object={fx.bloom} />);
+    passes.push(<primitive key="tone" object={fx.tone} />);
+    if (on.grade) passes.push(<primitive key="grade" object={fx.grade} />);
+    if (on.grain) passes.push(<primitive key="grain" object={fx.grain} />);
     return <EffectComposer multisampling={4}>{passes}</EffectComposer>;
   }, [fx, on]);
   const cam = camera as THREE.PerspectiveCamera;
@@ -87,7 +98,7 @@ const Inner: React.FC<{ id: number; kit: Kit }> = ({ id, kit }) => {
   fx.grain.seed = f; // deterministic per frame
   return (
     <>
-      <primitive object={world.root} dispose={null} />
+      <primitive object={world.root} />
       {post}
     </>
   );

@@ -203,11 +203,19 @@ jobs:
           mkdir -p out
           # Order by the numeric index, not by string: "chunk-10" sorts before "chunk-2"
           # under a plain sort, which would silently splice the film out of order.
-          CHUNKS=$(ls -d dl/chunk-* \
-            | sed 's#.*/chunk-##' \
-            | sort -n \
-            | while read i; do echo "dl/chunk-$i/chunk_$i.mp4"; done)
+          #
+          # Find each mp4 rather than assuming its depth. download-artifact preserves the
+          # upload's path RELATIVE TO THE SHORTEST COMMON ROOT: uploading out/chunks/x.mp4
+          # alongside out/x.log makes the common root `out/`, so the file lands at
+          # dl/chunk-N/chunks/chunk_N.mp4 — NOT dl/chunk-N/chunk_N.mp4. The first render
+          # that ever reached this job would have failed on a missing-file error.
+          CHUNKS=$(ls -d dl/chunk-* | sed 's#.*/chunk-##' | sort -n | while read i; do
+            f=$(find "dl/chunk-$i" -name "chunk_$i.mp4" -type f | head -1)
+            [ -n "$f" ] || { echo "::error::chunk-$i artifact has no chunk_$i.mp4"; exit 1; }
+            echo "$f"
+          done)
           echo "chunks in order:"; echo "$CHUNKS"
+          [ -n "$CHUNKS" ] || { echo "::error::no chunk artifacts downloaded"; exit 1; }
           bash tools/stitch.sh out/video_silent.mp4 $CHUNKS
 
       - name: concat the render logs
@@ -215,7 +223,9 @@ jobs:
           mkdir -p out
           : > out/render.log
           for i in $(ls -d dl/chunk-* | sed 's#.*/chunk-##' | sort -n); do
-            cat "dl/chunk-$i/chunk_$i.log" >> out/render.log 2>/dev/null || true
+            # same nesting caveat as the stitch step: locate the log, don't assume its depth
+            L=$(find "dl/chunk-$i" -name "chunk_$i.log" -type f | head -1)
+            [ -n "$L" ] && cat "$L" >> out/render.log
           done
           wc -l out/render.log || true
 
