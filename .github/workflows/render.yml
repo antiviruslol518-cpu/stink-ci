@@ -270,6 +270,9 @@ jobs:
           # it was given join cleanly — it cannot know one is missing from the middle, and a
           # film with a hole is exactly the silent failure this pipeline exists to prevent.
           NPLAN=${{ needs.prep.outputs.chunks }}
+          # prep can fail (typecheck, WebGL probe), in which case there is no plan and no
+          # chunks worth joining. Say so plainly instead of doing arithmetic on an empty var.
+          [ -n "$NPLAN" ] || { echo "::error::no chunk plan from prep — nothing to stitch"; exit 1; }
           NGOT=$(echo "$CHUNKS" | grep -c . || true)
           echo "chunks present: $NGOT / $NPLAN"
           if [ "$NGOT" != "$NPLAN" ]; then
