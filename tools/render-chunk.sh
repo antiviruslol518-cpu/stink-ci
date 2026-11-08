@@ -3,13 +3,21 @@
 #
 # Software WebGL (swangle) is fragile: under memory pressure the browser page crashes and
 # @remotion/renderer throws "Page crashed!". That is not a logic error — it is a bad
-# minute. Rerunning the same chunk from the same start frame usually succeeds.
+# minute. Rendering a smaller range usually succeeds.
 #
-# So: retry the whole chunk up to N times, and if a chunk keeps dying, split it in half
-# and render the halves separately. A 300-frame chunk that dies at frame 250 does not
-# have to lose the first 250 frames' worth of wall-clock if we bisect.
+# THE TRAP THIS SCRIPT EXISTS TO AVOID: a retry of the WHOLE range does not fit in the job
+# timeout. At ~82 s/frame a 118-frame chunk is ~161 min per attempt, so two attempts (322
+# min) nearly exhausts a 350-minute job and the third is guaranteed to be killed mid-render
+# — which is exactly how chunks 0 and 9 died: deterministic failure, three retries, no
+# time left to bisect, artifact empty.
+#
+# So the order is: try the whole range ONCE. If it fails, BISECT immediately rather than
+# retrying the same size — a half is half the wall-clock and can itself be retried. Only
+# ranges below BISECT_MIN are worth retrying at the same size.
 #
 # Usage: render-chunk.sh <out.mp4> <start> <end> [scale] [crf] [conc]
+#   CHUNK_TRIES   attempts per range before bisecting (default 3)
+#   BISECT_MIN    below this many frames, retry instead of bisecting (default 30)
 set -uo pipefail
 
 OUT="${1:?usage: render-chunk.sh <out.mp4> <start> <end> [scale] [crf] [conc]}"
@@ -20,6 +28,7 @@ CRF="${5:-24}"
 CONC="${6:-1}"
 
 TRIES="${CHUNK_TRIES:-3}"
+BISECT_MIN="${BISECT_MIN:-30}"
 mkdir -p "$(dirname "$OUT")"
 
 render_once() {
@@ -28,41 +37,50 @@ render_once() {
   node tools/render.mjs "$o" "$a" "$b" "$SCALE" "$CRF" "$CONC"
 }
 
-attempt=0
-while [ "$attempt" -lt "$TRIES" ]; do
-  attempt=$((attempt + 1))
-  echo "-- attempt $attempt/$TRIES"
-  if render_once "$START" "$END" "$OUT"; then
-    echo "OK: $OUT ($START-$END)"
-    exit 0
-  fi
-  echo "!! chunk $START-$END failed on attempt $attempt"
-  rm -f "$OUT"
-done
+# Render [a,b] into o, bisecting on failure. Returns 0 only if o exists and is complete.
+render_range() {
+  local a="$1" b="$2" o="$3" depth="${4:-0}"
+  local span=$((b - a + 1))
+  local pad; pad=$(printf '%*s' "$depth" '')
 
-# Repeated failure: bisect. Halves are independent and each can itself be retried.
-SPAN=$((END - START + 1))
-if [ "$SPAN" -lt 30 ]; then
-  echo "FAILED: $START-$END ($SPAN frames) will not render. Not bisecting further."
-  exit 1
-fi
-MID=$((START + SPAN / 2))
-echo "bisecting $START-$END into $START-$((MID - 1)) and $MID-$END"
-A="${OUT%.mp4}_a.mp4"
-B="${OUT%.mp4}_b.mp4"
-render_once_retry() {
-  local a="$1" b="$2" o="$3" n=0
-  while [ "$n" -lt "$TRIES" ]; do
+  # Below the bisect floor there is nothing smaller to fall back to: retry at this size.
+  local tries=1
+  if [ "$span" -lt "$BISECT_MIN" ]; then tries="$TRIES"; fi
+
+  local n=0
+  while [ "$n" -lt "$tries" ]; do
     n=$((n + 1))
-    if render_once "$a" "$b" "$o"; then return 0; fi
+    echo "${pad}-- [$a-$b] ($span frames) attempt $n/$tries"
+    if render_once "$a" "$b" "$o"; then
+      echo "${pad}   OK [$a-$b]"
+      return 0
+    fi
     rm -f "$o"
+    echo "${pad}   !! [$a-$b] failed on attempt $n"
   done
-  return 1
-}
-render_once_retry "$START" "$((MID - 1))" "$A" || { echo "FAILED: first half"; exit 1; }
-render_once_retry "$MID" "$END" "$B" || { echo "FAILED: second half"; exit 1; }
 
-# Join the two halves into the chunk file so downstream steps see one file.
-bash tools/stitch.sh "$OUT" "$A" "$B" || exit 1
-rm -f "$A" "$B"
-echo "OK (bisected): $OUT ($START-$END)"
+  # A single attempt on a large range failed. Retrying the same size will very likely fail
+  # the same way AND may not fit in the remaining job time — split it instead.
+  if [ "$span" -lt 2 ]; then
+    echo "${pad}   FAILED: frame $a will not render"
+    return 1
+  fi
+  local mid=$((a + span / 2))
+  echo "${pad}   bisecting [$a-$b] -> [$a-$((mid - 1))] + [$mid-$b]"
+  local A="${o%.mp4}_a.mp4" B="${o%.mp4}_b.mp4"
+  render_range "$a" "$((mid - 1))" "$A" $((depth + 1)) || { echo "${pad}   FAILED: first half"; return 1; }
+  render_range "$mid" "$b" "$B" $((depth + 1)) || { echo "${pad}   FAILED: second half"; return 1; }
+
+  # Join the halves so downstream steps see one file.
+  bash tools/stitch.sh "$o" "$A" "$B" || { echo "${pad}   FAILED: joining halves"; return 1; }
+  rm -f "$A" "$B"
+  echo "${pad}   OK (bisected) [$a-$b]"
+  return 0
+}
+
+if render_range "$START" "$END" "$OUT"; then
+  echo "OK: $OUT ($START-$END)"
+  exit 0
+fi
+echo "FAILED: $START-$END could not be rendered"
+exit 1
