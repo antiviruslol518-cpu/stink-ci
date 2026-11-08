@@ -119,10 +119,22 @@ export function palace(b: Batch, M: Record<string, THREE.Material>, zc: number, 
  */
 export function terrace(b: Batch, M: Record<string, THREE.Material>) {
   const back = PALACE_Z + 16; // run the floor under the whole palace so no gap shows at its base
+  // The river runs x = -900..900, but the terrace only ever spanned x = -90..90. Past its end
+  // the water plane's near edge (z = +30) met bare sky, which drew a thin dark diagonal across
+  // the sky in shot 3 — the one shot that looks along the bank from outside the terrace's
+  // length. Extending the embankment closes it with land, which is what is actually there: the
+  // bank does not stop at the palace.
+  //
+  // Only the +x side is extended. Shot 3 is the only camera that sees this edge and it looks
+  // toward +x, so the -x side never needs it — and the CHAMBER sits at x = -162..-138 with its
+  // wood floor coplanar at y = D0. Widening the cobble past it z-fights the two floors, which
+  // cost shot 1 its benches (wood 34 % -> 2 %) when this was first written as a symmetric
+  // -420..420. Keeping the extension one-sided fixes the sky without touching the interior.
+  const BANK_X = 420;
   // ground behind the parapet
-  b.add(face(V(-90, D0, QUAY), V(90, D0, QUAY), V(90, D0, back), V(-90, D0, back), UP), M.cobble);
+  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP), M.cobble);
   // embankment wall down to the water (its face looks out over the river, toward -z)
-  b.add(face(V(-90, D0, QUAY), V(90, D0, QUAY), V(90, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER), M.wall);
+  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER), M.wall);
   // parapet with coping
   b.add(boxGeo(V(-90, D0, QUAY - 0.9), V(90, D0 + 1.05, QUAY), 2), M.wall);
   b.add(boxGeo(V(-90, D0 + 1.05, QUAY - 1.05), V(90, D0 + 1.3, QUAY + 0.05), 2), M.cope);
