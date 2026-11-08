@@ -133,7 +133,7 @@ const dolly = (pos: V3, look: V3, k: number, rest: Partial<Cam> = {}): Shot =>
 // enough bench to say "this is a room". Measured with tools/sightlines.mjs: this framing puts
 // 29 % water, 23 % wall, 22 % tracery and 26 % sky through the glass. Lower and the benches fill
 // the bottom third; higher and the sill cuts the river off.
-const CH = { CX: 150, Z1: 47, Z0: 31 };
+const CH = { CX: -150, Z1: 47, Z0: 31 };
 const S1a = (f: number) => dolly([CH.CX, 8.2, 35], [CH.CX, 7.8, 18], pushK(f, 0, 0.0016), { fov: 58 });
 const S1b = (f: number) => dolly([CH.CX + 0.9, 8.1, 33], [CH.CX - 0.3, 7.8, 16], pushK(f, 40, 0.0019), { fov: 52, roll: -0.015 });
 // Shot 2: the reveal — the Palace from across the river, water in the foreground

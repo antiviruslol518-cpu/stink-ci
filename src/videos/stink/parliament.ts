@@ -261,11 +261,18 @@ export function flotsam(b: Batch, M: Record<string, THREE.Material>) {
  * and one huge pointed window full of hazy light with the sludge river beyond it. That single
  * image carries all three of the shot's beats — interior, oppression, and the river.
  */
+// The chamber sits at NEGATIVE x, well behind the cameras of shots 3 and 4 (which look along +x
+// over the river) and far off the left edge of the palace shots. At +x it was 1 % visible in both
+// river shots — a stray grey box in the haze, which is exactly the kind of thing that reads as a
+// bug rather than as scenery. Verified with tools/_leak2.mjs: 0 % from every shot but 1.
 export const CHAMBER = {
-  X0: 138, X1: 162,      // along the river
+  X0: -162, X1: -138,    // along the river
   Z0: 31, Z1: 47,        // Z0 is the window wall, Z1 the back wall
   Y0: D0, Y1: D0 + 14,   // floor and ceiling
-  WX0: 146, WX1: 154,    // window opening
+  // The window is the room's centre line +/- 4 m. It MUST be derived from CX, not written as an
+  // absolute: when the chamber moved to negative x the hardcoded 146..154 stayed behind, so the
+  // room had no opening on its own wall and shot 1 rendered 75 % wall.
+  WX0: -154, WX1: -146,  // window opening
   // The sill runs almost to the floor on purpose. The camera stands 14 m back at eye height,
   // and the water is 7.65 m below it: the near bank of the river sits about 27 deg down, which
   // is the bottom edge of a 56 deg frame. Any higher sill and every ray through the glass goes
@@ -274,7 +281,7 @@ export const CHAMBER = {
   SILL: D0 + 0.25,       // bottom of the glass
   SPRING: D0 + 9.0,      // where the arch starts to turn
   APEX: D0 + 12.5,       // the point
-  CX: 150,
+  CX: -150,
 };
 
 export function chamber(b: Batch, M: Record<string, THREE.Material>) {
