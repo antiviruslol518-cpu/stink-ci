@@ -1,67 +1,69 @@
-# Original light comedic military march for the bridge short, composed and synthesized here (Bb major, 120 bpm:
-# one quarter note = one footfall, the beat grid t = k * 0.5 s is the soldiers' step grid in every marching shot).
-# Sections follow the picture: hook tutti + whistlers | story march (band) | whistler solo -> column chorus -> nervous
-# falter | tension climb, dead stop on "Then," | (silence through the snap, the drop and the deadpan joke) |
-# warm sway (84 bpm = the bridge's 0.7 Hz sway) | music-box waltz locked to the swing pushes | golden march + whistlers |
-# rule stabs on the hammer blows | lazy swung tourist version ending on "tourists".
+# Original score for "The Great Stink" (London, July 1858), synthesized here in D minor.
+#
+# The film is not a march. It is a city suffocating in its own sewage while the men who could
+# have fixed it argued about the bill, and the one thing that finally worked did so for the
+# wrong reason. So the score is built on a low sustained drone rather than a beat: D minor,
+# slow, no whistling column, no oom-pah. The pulse only appears when the film talks about
+# NUMBERS (two and a half million people, three million pounds, eighty two miles) — a dry
+# pizzicato ostinato that ticks like a ledger.
+#
+# The one structural rule: the music SNAPS DEAD at T.SILENT = 48.41 s, on "It was not." That
+# is the film's turn — the belief that smell itself was disease is refuted in three words — and
+# a score underneath it would soften the only hard edge in the piece. Silence runs 48.41-52.32,
+# then a single warm chord returns under "But the sewers worked anyway."
+#
+# Section boundaries are the shot boundaries from story.ts wherever the picture changes place,
+# and the named word onsets from timeline.py wherever it changes argument. mix.py reads
+# SECTIONS for its per-section level automation, so SECTIONS must tile 0..T.DUR with no gaps
+# and no overlaps, and every name except "dropout" must appear in MUSIC_TARGET.
 import numpy as np
-from dsp import SR, ns, rng, pan, place, fades, dbg, make_ir, convolve_st, integrated, lp, hp
+from dsp import SR, ns, rng, pan, place, dbg, make_ir, convolve_st, integrated, hp
 import instruments as I
 import timeline as T
 
 N = ns(T.DUR)
-Q = 0.5  # quarter note (s)
-
-# theme A: (bar, beat, length in quarters, midi)  - whistle / fife register
-THEME = [
-    (1, 0, 1, 82), (1, 1, .75, 82), (1, 1.75, .25, 84), (1, 2, 1, 86), (1, 3, 1, 82),
-    (2, 0, 1, 77), (2, 1, .5, 79), (2, 1.5, .5, 81), (2, 2, 1, 82), (2, 3.5, .5, 77),
-    (3, 0, .75, 79), (3, .75, .25, 81), (3, 1, .5, 82), (3, 1.5, .5, 79), (3, 2, 1, 87), (3, 3, .5, 86), (3, 3.5, .5, 84),
-    (4, 0, 2, 84), (4, 3.5, .5, 77),
-    (5, 0, 1, 82), (5, 1, .75, 82), (5, 1.75, .25, 84), (5, 2, 1, 86), (5, 3, 1, 89),
-    (6, 0, .5, 87), (6, .5, .5, 86), (6, 1, .5, 84), (6, 1.5, .5, 82), (6, 2, 1, 81), (6, 3, .5, 82), (6, 3.5, .5, 84),
-    (7, 0, .75, 86), (7, .75, .25, 84), (7, 1, .5, 82), (7, 1.5, .5, 81), (7, 2, 1, 79), (7, 3, 1, 84),
-    (8, 0, 1, 82), (8, 1, .5, 77), (8, 1.5, .5, 74), (8, 2, 1, 70),
-]
-PICKUP3 = [(0, 2.5, .5, 74), (0, 3, .5, 75), (0, 3.5, .5, 77)]
-CHB = {1: ["Bb"] * 4, 2: ["F", "F", "Bb", "Bb"], 3: ["Cm", "Cm", "Eb", "Eb"], 4: ["F7"] * 4, 5: ["Bb"] * 4,
-       6: ["Eb", "Eb", "F", "F"], 7: ["Gm", "Gm", "Cm", "F7"], 8: ["Bb"] * 4}
-CH = {
-    "Bb": dict(oom=(34, 41), pah=[53, 58, 62], hi=[58, 62, 65]),
-    "F": dict(oom=(41, 36), pah=[53, 57, 60], hi=[57, 60, 65]),
-    "F7": dict(oom=(41, 36), pah=[51, 57, 60], hi=[57, 60, 63]),
-    "Cm": dict(oom=(36, 43), pah=[55, 60, 63], hi=[60, 63, 67]),
-    "Eb": dict(oom=(39, 46), pah=[55, 58, 63], hi=[58, 63, 67]),
-    "Gm": dict(oom=(43, 38), pah=[55, 58, 62], hi=[58, 62, 67]),
-    "F#o7": dict(oom=(42, 42), pah=[54, 57, 60, 63], hi=[57, 60, 63]),
-    "G#o7": dict(oom=(44, 44), pah=[56, 59, 62, 65], hi=[59, 62, 65]),
-}
 F = I.m2f
 
-# where each section of the music sits (used for the cue sheet and the level automation)
+# ---- the sections (name, start, end); must tile 0 .. T.DUR exactly -----------------------
+# "dropout" is the silence: mix.py skips it when computing levels and hard-cuts around it.
 SECTIONS = [
-    ("hook", 0.0, T.FLASH), ("town", T.FLASH, 9.0), ("march", 9.0, 15.0), ("bounce", 15.0, 21.0),
-    ("whistle", 21.0, 27.43), ("tension", 27.43, 33.0), ("dropout", 33.0, 43.43), ("sway", 43.43, 47.24),
-    ("swing", 47.24, 54.0), ("march2", 54.0, 57.83), ("rule", 57.83, 62.0), ("tourists", 62.0, T.DUR),
+    ("breath",   0.000,  2.567),   # shot 1  "you cannot breathe"        the room holds its breath
+    ("city",     2.567,  7.333),   # shot 2  the reveal                   low swell, one bell
+    ("millions", 7.333, 11.467),   # shot 3  two and a half million       the ledger starts ticking
+    ("river",   11.467, 13.567),   # shot 4  "The Thames."                the ticking stops; a cold bell
+    ("sludge",  13.567, 18.667),   # shot 5  "it is untreated sewage"     weight, tuba
+    ("lime",    18.667, 23.533),   # shot 6  curtains and handkerchiefs   a grotesque music box
+    ("empty",   23.533, 28.000),   # shot 7  the chamber empties          the box, alone
+    ("cholera", 28.000, 32.933),   # shot 8  drinking from the same river dread, a rising line
+    ("borrow",  32.933, 38.267),   # shot 9  three million in eighteen days the ledger again, driving
+    ("tunnel",  38.267, 45.100),   # shot 10 inside the sewer             the biggest music in the film
+    ("nosense", 45.100, 48.410),   # shot 11 "the smell itself was the poison"  pulls back to nothing
+    ("dropout", 48.410, 52.320),   # shot 12 "It was not."                SILENCE
+    ("worked",  52.320, 54.867),   # shot 12 "the sewers worked anyway"   one warm chord
+    ("saved",   54.867, 58.400),   # shot 13 the river, golden            the theme, finally calm
+    ("mistake", 58.400, T.DUR),    # shot 14 "saved by a mistake"         resolves, and stops
 ]
 
+# Music level per section, LU below the voice in that section (mix.py turns these into gains).
+# The drone sections sit well under the narration; only the tunnel is allowed to compete.
+MUSIC_TARGET = {
+    "breath": -15.5, "city": -13.0, "millions": -12.0, "river": -14.5, "sludge": -12.5,
+    "lime": -14.0, "empty": -15.0, "cholera": -13.0, "borrow": -11.5, "tunnel": -11.0,
+    "nosense": -13.5, "worked": -16.0, "saved": -13.5, "mistake": -14.5,
+}
 
-def swingb(b):
-    fl = np.floor(b)
-    fr_ = b - fl
-    return fl + (2 / 3 if fr_ in (0.5, 0.75) else (1 / 3 if fr_ == 0.25 else fr_))
-
-
-def theme(t_bar1, bars=range(1, 9), transpose=0, pickup=False, swing=False, late=0.0):
-    ev = []
-    for (b, beat, d, m) in THEME + (PICKUP3 if pickup else []):
-        if b == 0 and not pickup:
-            continue
-        if b != 0 and b not in bars:
-            continue
-        bb = swingb(beat) if swing else beat
-        ev.append((t_bar1 + (b - 1) * 4 * Q + bb * Q + late, d * Q, m + transpose))
-    return sorted(ev)
+# ---- harmony ---------------------------------------------------------------------------
+# D minor throughout, with A major (C#) when the harmony has to lean — that raised seventh is
+# what makes it read as Victorian rather than merely sad.
+CH = {
+    "Dm":  dict(lo=38, mid=[50, 53, 57], hi=[62, 65, 69]),
+    "Gm":  dict(lo=43, mid=[50, 55, 58], hi=[62, 67, 70]),
+    "Bb":  dict(lo=46, mid=[50, 53, 58], hi=[62, 65, 70]),
+    "F":   dict(lo=41, mid=[53, 57, 60], hi=[65, 69, 72]),
+    "C":   dict(lo=36, mid=[48, 52, 55], hi=[60, 64, 67]),
+    "A":   dict(lo=45, mid=[52, 57, 61], hi=[64, 69, 73]),
+    "Dmaj": dict(lo=38, mid=[50, 54, 57], hi=[62, 66, 69]),   # only at the very end
+}
 
 
 class Band:
@@ -76,300 +78,278 @@ class Band:
             self.send[name] = send
         return self.tr[name]
 
-    def add(self, name, x, t, p=0.0, g=1.0, send=0.15):
-        buf = self.track(name, send)
+    def add(self, name, x, t, p=0.0, g=1.0, send=None):
+        if t >= T.DUR:
+            return
+        buf = self.track(name, 0.2 if send is None else send)
         place(buf, pan(x, p) if np.ndim(x) == 1 else x, t, g)
 
+    def cue(self, t, text):
+        self.cues.append((float(t), text))
 
-R = rng(1831)
+
+R = rng(1858)
 
 
 def _r():
     return rng(int(R.integers(1 << 30)))
 
 
-def oompah(b, t_bar, chords, vel=0.6, every=True, pah_vel=0.4, bounce=False, pah=True):
-    """tuba on the beats (root/fifth alternating) + after-beat horns on the &s; bounce = octave eighths"""
-    for beat in range(4):
-        c = CH[chords[beat]]
-        t = t_bar + beat * Q
-        if bounce:
-            lo = c["oom"][0] if c["oom"][0] >= 36 else c["oom"][0] + 12
-            b.add("tuba", I.brass(F(lo), 0.2, vel, _r(), "tuba", scoop=-30), t, -0.1)
-            b.add("tuba", I.brass(F(lo + 12), 0.16, vel * 0.85, _r(), "tuba", scoop=-45), t + Q / 2, -0.1)
-        elif every or beat in (0, 2):
-            m = c["oom"][beat % 2] if every else c["oom"][0 if beat == 0 else 1]
-            b.add("tuba", I.brass(F(m), 0.3, vel * (1.0 if beat in (0, 2) else 0.88), _r(), "tuba"), t, -0.1)
-        if pah:
-            if every:
-                for k, m in enumerate(c["pah"]):
-                    b.add("pah", I.brass(F(m), 0.15, pah_vel, _r(), "horn", scoop=-12), t + Q / 2 + 0.004 * k, 0.32 - 0.12 * k)
-            elif beat in (1, 3):
-                for k, m in enumerate(c["pah"]):
-                    b.add("pah", I.brass(F(m), 0.17, pah_vel, _r(), "horn", scoop=-12), t + 0.004 * k, 0.32 - 0.12 * k)
+# ---- the few gestures the whole score is made of ---------------------------------------
+
+def drone(b, t0, t1, chord="Dm", vel=0.5, name="pad", att=0.9, rel=1.0, octave=-12):
+    """one sustained low chord: the floor of the score. Everything else sits on top of it."""
+    c = CH[chord]
+    freqs = [F(c["lo"] + octave)] + [F(m) for m in c["mid"]]
+    b.add(name, I.pad(freqs, t1 - t0, vel, _r(), att=att, rel=rel, warm=700.0, detune=9.0), t0, 0.0)
 
 
-SN = {
-    "light": [1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 1, 1],
-    "march": [3, 0, 1, 1, 2, 0, 1, 0, 3, 0, 1, 1, 2, 0, 1, 0],
-    "drive": [2, 1, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1, 2, 1, 1, 1],
-}
+def bell(b, t, midi, vel=0.5, p=0.0, dur=2.2):
+    """a single cold struck note — the film's punctuation mark"""
+    b.add("glock", I.glock(F(midi), vel, _r(), dur=dur), t, p)
 
 
-def snare_bar(b, t_bar, pat, vel, steps=range(16), cres=0.0):
-    for s in steps:
-        v = SN[pat][s]
-        if not v:
-            continue
-        t = t_bar + s * Q / 4
-        vv = vel * (1 + cres * s / 16) * {1: 0.5, 2: 0.9, 3: 0.95}[v] * R.uniform(0.93, 1.05)
-        if v == 3:
-            b.add("snare", I.snare(vv * 0.4, _r()), t - 0.026, 0.05)
-        b.add("snare", I.snare(vv, _r()), t + R.normal(0, 0.002), 0.05)
+def hit(b, t, chord="Dm", vel=0.75, p=0.0):
+    """timpani + low brass together: the weight that lands on a named beat"""
+    c = CH[chord]
+    b.add("timpani", I.timpani(F(c["lo"]), vel, _r(), dur=2.4), t, -0.05)
+    for m in [c["lo"], c["lo"] + 12] + c["mid"][:2]:
+        b.add("stab", I.brass(F(m), 0.22, vel * 0.8, _r(), "stab", scoop=-14), t, p + (m - 50) / 40)
 
 
-def roll(b, t0, t1, v0, v1, accent=None, at=None):
-    for t, v in I.snare_roll(t0, t1, v0, v1, _r()):
-        b.add("snare", I.snare(v, _r(), dur=0.14, buzz=True), t, 0.05)
-    if accent:
-        at = t1 if at is None else at
-        b.add("snare", I.snare(accent * 0.4, _r()), at - 0.026, 0.05)
-        b.add("snare", I.snare(accent, _r()), at, 0.05)
+def ledger(b, t0, t1, chord="Dm", step=0.25, vel=0.4, p=0.0):
+    """the pizzicato ostinato: the sound of counting. Used only for NUMBERS."""
+    c = CH[chord]
+    fig = [c["lo"] + 12, c["mid"][0], c["mid"][1], c["mid"][0], c["mid"][2], c["mid"][1], c["mid"][0], c["mid"][1]]
+    k = 0
+    t = t0
+    while t < t1 - 1e-6:
+        m = fig[k % len(fig)]
+        b.add("pluck", I.pluck(F(m), vel * R.uniform(0.82, 1.0), _r(), dur=step * 1.6, bright=0.45), t, p)
+        t += step
+        k += 1
 
 
-def melody(b, name, notes, vel, transpose=0, fn="glock", p=0.0, gate=0.9):
+def tune(b, name, notes, vel, fn="glock", p=0.0, gate=0.9):
+    """a sparse melodic line; `notes` is a list of (t, dur, midi)"""
     for (t, d, m) in notes:
-        m = m + transpose
+        if t >= T.DUR:
+            continue
         if fn == "glock":
             x = I.glock(F(m), vel * R.uniform(0.92, 1.05), _r())
-        elif fn == "fife":
-            x = I.fife(F(m), d * gate, vel * R.uniform(0.94, 1.04), _r())
-        elif fn == "vibes":
-            x = I.vibes(F(m), vel * R.uniform(0.92, 1.05), _r(), dur=max(1.2, d + 0.8), damp=d + 0.35)
         elif fn == "musicbox":
             x = I.musicbox(F(m), vel * R.uniform(0.92, 1.05), _r())
+        elif fn == "vibes":
+            x = I.vibes(F(m), vel * R.uniform(0.92, 1.05), _r(), dur=max(1.4, d + 0.9), damp=d + 0.4)
+        elif fn == "fife":
+            x = I.fife(F(m), d * gate, vel * R.uniform(0.94, 1.04), _r())
+        else:
+            raise ValueError(fn)
         b.add(name, x, t, p)
 
 
-def chorus(b, name, notes, voices, seed, joins=None, falters=None, spread=0.75, vel=1.0, solo_gain=1.0):
-    """several soldiers whistling the same tune: own detune, timing, vibrato, breath and place in the column"""
-    rr = rng(seed)
-    for v in range(voices):
-        rv = rng(seed * 101 + v)
-        nv = [(t, d, m, vel * rv.uniform(0.85, 1.0)) for (t, d, m) in notes if joins is None or t >= joins[v] - 1e-6]
-        if not nv:
-            continue
-        fal = (falters[v], -rv.uniform(1.2, 3.2)) if falters else None
-        t0, y = I.whistle(nv, rv, detune=rv.uniform(-11, 11) if v else 0.0, jit=0.010, lag=rv.uniform(0, 0.022) if v else 0.0,
-                          vib_rate=rv.uniform(5.0, 6.6), vib_depth=rv.uniform(10, 22), breath=rv.uniform(0.04, 0.07), falter=fal)
-        g = (solo_gain if v == 0 else rv.uniform(0.45, 0.8))
-        p = 0.0 if v == 0 else spread * rr.uniform(-1, 1)
-        if v:  # the rest of the column is further away: a little duller
-            y = lp(y, rv.uniform(5000, 9000), 1)
-        b.add(name, y, t0, p, g)
+# ---- the theme ---------------------------------------------------------------------------
+# Eight notes, D minor, falling. It is stated once in "city", broken up in "millions", and only
+# comes back whole in "saved" — which is the point: the same tune, finally allowed to finish.
+THEME = [(0.0, 1.0, 69), (1.0, 0.5, 67), (1.5, 0.5, 65), (2.0, 1.0, 64), (3.0, 1.5, 62),
+         (4.5, 0.5, 64), (5.0, 1.0, 65), (6.0, 2.0, 62)]
 
 
+def theme_at(t0, vel=0.4, fn="glock", p=0.0, octave=0):
+    return [(t0 + t, d, m + octave) for (t, d, m) in THEME]
+
+
+# =========================================================================================
 def build():
     b = Band()
-    for name, send in [("whistle", 0.0), ("fife", 0.16), ("glock", 0.22), ("tuba", 0.10), ("pah", 0.18), ("snare", 0.13),
-                       ("cymbal", 0.16), ("stab", 0.16), ("timpani", 0.18), ("pad", 0.25), ("vibes", 0.26), ("musicbox", 0.26),
-                       ("pluck", 0.18), ("brush", 0.12), ("triangle", 0.25)]:
+    for name, send in [("pad", 0.30), ("pluck", 0.16), ("glock", 0.28), ("musicbox", 0.30),
+                       ("vibes", 0.30), ("tuba", 0.12), ("stab", 0.20), ("timpani", 0.22),
+                       ("cymbal", 0.20), ("fife", 0.18)]:
         b.track(name, send)
 
-    # ============ HOOK 0 - 4.33: tutti + whistling column, drum fill under "...across it.", band cut by the white flash,
-    # button hit ON the flash (after the last word, so it never masks the hook line)
-    h = theme(0.0, bars=[1, 2])
-    chorus(b, "whistle", h, 7, 11)
-    melody(b, "glock", h, 0.5, 12, "glock", -0.35)
-    for bar in (1, 2):
-        tb = (bar - 1) * 2.0
-        oompah(b, tb, CHB[bar], 0.68, True, 0.42)
-        snare_bar(b, tb, "march", 0.62, steps=range(16) if bar == 1 else range(8))
-    roll(b, 3.0, 4.28, 0.25, 0.62)
-    b.add("cymbal", I.cymbal(0.45, _r()), 0.0, 0.0)
-    b.cues.append((0.0, "hook: theme A1-A2 tutti, 7 whistlers, tuba/after-beats/snare; snare fill 3.0-4.3 under 'across it.'"))
-    hook_cut = np.ones(N)
-    a, z = ns(T.FLASH - 0.03), ns(T.FLASH + 0.015)
-    hook_cut[a:z] = np.linspace(1, 0, z - a)
-    hook_cut[z:] = 0
+    # ============ 1 BREATH 0 - 2.567: "you are standing inside the British Parliament"
+    # The room itself. A held D minor with the raised seventh leaning into it, a tuba an octave
+    # below, and one struck note exactly on "standing". No pulse: the chamber is still.
+    drone(b, 0.0, 2.75, "Dm", 0.55, att=0.55, rel=0.5)
+    b.add("tuba", I.brass(F(38), 2.5, 0.35, _r(), "soft", scoop=-10), 0.0, -0.1)
+    bell(b, T.STANDING, 74, 0.28, -0.2)                    # E5 — the dissonance, unresolved
+    bell(b, 1.95, 81, 0.16, 0.25)
+    b.cue(0.0, "held Dm (add E), tuba D2, one struck E5 on 'standing' — the room, no pulse")
+
+    # ============ 2 CITY 2.567 - 7.333: the reveal — palace + sludge river
+    # A low swell that rises under the sentence, the theme stated for the first time (soft,
+    # alone), and a timpani roll into "million".
+    drone(b, 2.567, 7.6, "Dm", 0.5, att=0.8, rel=0.7)
+    b.add("tuba", I.brass(F(38), 2.2, 0.42, _r(), "tuba", scoop=-18), 2.6, -0.1)
+    b.add("tuba", I.brass(F(41), 1.6, 0.38, _r(), "tuba", scoop=-18), 4.9, -0.1)
+    tune(b, "glock", theme_at(3.1, 0.30, "glock", -0.15, octave=-12), 0.30)
+    hit(b, T.JULY, "Dm", 0.55, -0.05)
+    for t, v in I.snare_roll(7.05, 7.60, 0.05, 0.30, _r(), rate=18.0):
+        b.add("timpani", I.timpani(F(38), v * 0.5, _r(), dur=0.35), t, -0.05)
+    b.cue(2.567, "low Dm swell, theme stated soft on glock; timpani hit on 'July 1858'")
+    b.cue(7.05, "timpani roll into 'million'")
+
+    # ============ 3 MILLIONS 7.333 - 11.467: "two and a half million people"
+    # The ledger starts. This is the only place before the tunnel with a real pulse, and it is
+    # dry and small — counting, not marching.
+    drone(b, 7.333, 11.5, "Dm", 0.42, att=0.5, rel=0.6)
+    hit(b, T.MILLION, "Dm", 0.7, -0.05)
+    ledger(b, 7.61, 11.35, "Dm", step=0.25, vel=0.34, p=-0.12)
+    ledger(b, 8.61, 11.35, "Gm", step=0.5, vel=0.26, p=0.18)
+    tune(b, "glock", [(9.0, 0.5, 74), (9.5, 0.5, 77), (10.0, 0.5, 81), (10.5, 1.0, 79)], 0.26, p=0.2)
+    b.cue(7.61, "pizzicato ledger ostinato (Dm then Gm): the sound of counting")
+
+    # ============ 4 RIVER 11.467 - 13.567: "The Thames. It is not water anymore."
+    # Everything stops except one low chord and a cold bell on the word. The drop from the
+    # ostinato into this emptiness IS the sentence.
+    drone(b, 11.467, 13.7, "Bb", 0.4, att=0.35, rel=0.5)
+    bell(b, T.THAMES, 86, 0.34, 0.0, dur=3.0)              # D6, high and thin
+    b.add("tuba", I.brass(F(34), 2.0, 0.3, _r(), "soft", scoop=-8), 11.5, -0.1)
+    b.cue(11.467, "the ledger stops; Bb drone + one cold D6 on 'The Thames'")
+
+    # ============ 5 SLUDGE 13.567 - 18.667: "It is untreated sewage ... built directly beside it"
+    # Weight returns. Low brass on the beat, no melody: this is a description, not an argument.
+    drone(b, 13.567, 18.75, "Dm", 0.5, att=0.45, rel=0.6)
+    hit(b, T.SEWAGE, "Dm", 0.8, -0.05)
+    for k, m in enumerate([38, 38, 41, 38, 36, 38]):
+        t = 14.63 + k * 0.75
+        if t < 18.5:
+            b.add("tuba", I.brass(F(m), 0.55, 0.5, _r(), "tuba", scoop=-20), t, -0.1)
+    tune(b, "glock", [(16.2, 0.5, 74), (16.9, 0.5, 72), (17.6, 1.2, 70)], 0.22, p=0.25)
+    b.cue(14.63, "tuba pulse on the beat, low Dm drone, falling glock figure")
+
+    # ============ 6 LIME 18.667 - 23.533: "Members soak the curtains in lime ... St Albans"
+    # The grotesque joke of the film: grown men soaking curtains to hide a smell. A music box
+    # playing a stiff little D minor waltz, deliberately too pretty for what it is covering.
+    drone(b, 18.667, 23.6, "Gm", 0.32, att=0.5, rel=0.5)
+    box = [(18.68, 0.5, 74), (19.18, 0.5, 77), (19.68, 0.5, 81), (20.18, 1.0, 79),
+           (21.18, 0.5, 77), (21.68, 0.5, 74), (22.18, 0.5, 70), (22.68, 0.8, 69)]
+    tune(b, "musicbox", box, 0.30, "musicbox", p=0.15)
+    for k, m in enumerate([55, 58, 62, 55, 58, 62]):
+        t = 18.68 + k * 0.75
+        if t < 23.3:
+            b.add("pluck", I.pluck(F(m - 12), 0.24, _r(), dur=0.6, bright=0.35), t, -0.2)
+    b.cue(18.68, "grotesque music-box waltz in Gm over pizzicato — the lime and the handkerchiefs")
+
+    # ============ 7 EMPTY 23.533 - 28.000: "strong enough to empty a debating chamber"
+    # The box loses its accompaniment and slows into single notes. The emptying is audible.
+    drone(b, 23.533, 28.05, "Dm", 0.34, att=0.6, rel=0.6)
+    tune(b, "musicbox", [(23.81, 0.9, 74), (24.9, 0.9, 72), (26.0, 1.2, 69), (27.35, 1.6, 65)], 0.24, "musicbox", p=0.1)
+    b.cue(23.81, "music box alone, one note every ~1 s — the chamber emptying on 'Great Stink'")
+
+    # ============ 8 CHOLERA 28.000 - 32.933: "London had been drinking from that same river"
+    # A chromatic rise in the bass, the one thing that never resolves. Dread without a beat.
+    drone(b, 28.0, 32.95, "A", 0.4, att=0.7, rel=0.6)
+    climb = [(28.0, 45), (28.9, 46), (29.8, 47), (30.7, 48), (31.6, 49), (32.4, 50)]
+    for t, m in climb:
+        b.add("tuba", I.brass(F(m - 12), 1.1, 0.42 + 0.02 * (m - 45), _r(), "soft", scoop=-10), t, -0.1)
+    b.add("timpani", I.timpani(F(45), 0.45, _r(), dur=2.0), T.DRINKING, -0.05)
+    tune(b, "glock", [(29.4, 0.5, 76), (30.2, 0.5, 77), (31.0, 0.5, 79), (31.8, 1.0, 81)], 0.22, p=0.2)
+    b.cue(27.35, "A pedal with a chromatic bass climb (A-Bb-B-C-C#-D) — no resolution, dread")
+
+    # ============ 9 BORROW 32.933 - 38.267: "three million pounds in eighteen days"
+    # The ledger again, but faster and lower, and it accelerates: eighteen days is the point.
+    drone(b, 32.933, 38.3, "Dm", 0.46, att=0.4, rel=0.5)
+    hit(b, T.DECADES, "Dm", 0.6, -0.05)
+    ledger(b, 32.93, 35.6, "Dm", step=0.25, vel=0.36, p=-0.12)
+    ledger(b, 35.6, 38.1, "Dm", step=0.1875, vel=0.42, p=-0.12)
+    ledger(b, 34.0, 38.1, "A", step=0.375, vel=0.3, p=0.2)
+    hit(b, T.BORROW, "A", 0.85, -0.05)
+    b.cue(32.93, "ledger ostinato returns and tightens (0.25 s -> 0.1875 s steps): eighteen days")
+    b.cue(36.29, "A major hit on 'borrow three million pounds'")
+
+    # ============ 10 TUNNEL 38.267 - 45.100: inside the sewer with Bazalgette's navvies
+    # The loudest, densest music in the film, and the only place with a full low end. The tunnel
+    # reveal lands on a named hit; then it becomes mechanical — brick, water, men working.
+    hit(b, T.BAZALGETTE, "Dm", 1.0, -0.05)
+    b.add("cymbal", I.cymbal(0.34, _r(), dur=2.6), T.BAZALGETTE, 0.0)
+    drone(b, 38.267, 45.15, "Dm", 0.62, att=0.3, rel=0.6)
+    for k in range(14):
+        t = 38.56 + k * 0.5
+        if t >= 45.0:
+            break
+        ch = "Dm" if k % 4 < 2 else ("Bb" if k % 8 < 4 else "Gm")
+        c = CH[ch]
+        b.add("tuba", I.brass(F(c["lo"]), 0.4, 0.6, _r(), "tuba", scoop=-24), t, -0.1)
+        b.add("timpani", I.timpani(F(c["lo"]), 0.34, _r(), dur=0.7), t + 0.25, -0.05)
+    # the theme, low and slow, buried in the middle of the tunnel work
+    tune(b, "glock", theme_at(39.6, 0.28, "glock", 0.15, octave=-12), 0.28)
+    tune(b, "fife", [(41.6, 0.5, 69), (42.1, 0.5, 67), (42.6, 0.5, 65), (43.1, 1.5, 64)], 0.24, "fife", p=-0.2)
+    b.cue(38.56, "TUNNEL HIT on 'Bazalgette': brass + timpani + cymbal, then a mechanical tuba/timpani pulse")
+    b.cue(39.6, "theme, an octave down, half-buried under the work rhythm")
+
+    # ============ 11 NOSENSE 45.100 - 48.410: "the smell itself was the poison"
+    # Strip everything. By 48.4 there is one held note left and it is about to be cut.
+    drone(b, 45.1, 48.42, "A", 0.3, att=0.35, rel=0.05)
+    b.add("tuba", I.brass(F(33), 3.2, 0.26, _r(), "soft", scoop=-6), 45.1, -0.1)
+    tune(b, "glock", [(45.4, 0.8, 73), (46.3, 0.8, 76), (47.2, 1.1, 79)], 0.2, p=0.1)
+    b.cue(45.09, "everything pulls back to one A pedal and three rising bells — 'the part that makes no sense'")
+
+    # ============ 12 DROPOUT 48.410 - 52.320: "It was not." — SILENCE
+    # Nothing is placed here. The gate below enforces it even if a tail from section 11 runs on.
+    b.cue(T.SILENT, "SILENCE: music snaps dead on 'It was not.' and stays out for 3.9 s")
+
+    # ============ 13 WORKED 52.320 - 54.867: "But the sewers worked anyway"
+    # One warm chord, Dmaj-in-Dm: the first consonance in the film. Quiet, and it does not build.
+    drone(b, 52.32, 54.95, "Dmaj", 0.34, att=0.8, rel=0.6)
+    b.add("vibes", I.vibes(F(69), 0.3, _r(), dur=2.4, damp=1.6), 52.32, 0.0)
+    b.add("vibes", I.vibes(F(74), 0.24, _r(), dur=2.2, damp=1.4), 53.1, 0.2)
+    b.cue(52.32, "the music returns as one warm D-major chord — the first consonance in the film")
+
+    # ============ 14 SAVED 54.867 - 58.400: the river, golden
+    # The theme completes for the first time, in the open, on vibes. It is allowed to finish.
+    drone(b, 54.867, 58.45, "Dmaj", 0.42, att=0.6, rel=0.7)
+    tune(b, "vibes", theme_at(55.0, 0.34, "vibes", 0.1), 0.34, "vibes")
+    b.add("tuba", I.brass(F(38), 2.6, 0.3, _r(), "soft", scoop=-8), 55.0, -0.1)
+    b.add("timpani", I.timpani(F(38), 0.34, _r(), dur=2.2), T.BEATEN, -0.05)
+    b.cue(54.867, "THEME COMPLETES on vibes in D major — the first time the tune is allowed to finish")
+    b.cue(56.00, "soft timpani D on 'the cholera had already been beaten'")
+
+    # ============ 15 MISTAKE 58.400 - 62.567: "London was saved by a mistake"
+    # Back to D minor for the last word. A single struck note on "mistake", and the drone decays
+    # to nothing — the film ends on the sound of a room emptying.
+    drone(b, 58.4, T.DUR, "Dm", 0.36, att=0.5, rel=1.6)
+    tune(b, "vibes", [(58.4, 0.8, 69), (59.3, 0.8, 67), (60.2, 1.2, 65)], 0.28, "vibes", p=-0.1)
+    bell(b, T.MISTAKE, 62, 0.34, 0.0, dur=2.4)             # D4, low, on the last word
+    b.add("tuba", I.brass(F(26), 3.0, 0.3, _r(), "soft", scoop=-6), 58.5, -0.1)
+    b.cue(58.4, "D minor returns: the tune falls, one low D4 struck on 'mistake', drone decays")
+    b.cue(T.MISTAKE, "final struck D4 on 'a mistake' (61.28)")
+
+    # ============ the silence gate ========================================================
+    # SECTIONS is a description; this is the enforcement. Zero the whole band from T.SILENT to
+    # the return of "worked", with short ramps so the cut is a snap rather than a click.
+    gate = np.ones(N)
+    a0, a1 = ns(T.SILENT - 0.012), ns(T.SILENT)
+    gate[a0:a1] = np.linspace(1, 0, a1 - a0)
+    gate[a1:ns(52.32)] = 0.0
+    a2, a3 = ns(52.32), ns(52.32 + 0.02)
+    gate[a2:a3] = np.linspace(0, 1, a3 - a2)
     for k in b.tr:
-        b.tr[k] *= hook_cut[None, :]
-    for m in [46, 53, 58, 62, 65]:
-        b.add("stab", I.brass(F(m), 0.2, 0.8, _r(), "stab", scoop=-15), T.FLASH, (m - 56) / 20)
-    b.add("tuba", I.brass(F(34), 0.25, 0.8, _r(), "tuba"), T.FLASH, -0.1)
-    b.add("glock", I.glock(F(94), 0.6, _r()), T.FLASH, -0.35)
-    b.add("cymbal", I.cymbal(0.4, _r(), dur=1.2), T.FLASH, 0.0)
-    b.cues.append((T.FLASH, "Bb button + light clash exactly on the white flash (frame 130), then the band is gone"))
+        b.tr[k] *= gate[None, :]
 
-    # ============ STORY MARCH 4.5 - 21: band plays theme A (bars at odd seconds so "Then," = 33.0 is a downbeat)
-    roll(b, 4.5, 4.96, 0.15, 0.5, accent=0.55, at=5.0)
-    s0 = 5.0
-    a12 = theme(s0, bars=[1, 2])
-    melody(b, "glock", a12, 0.36, 12, "glock", -0.35)
-    melody(b, "fife", a12, 0.42, 0, "fife", 0.25)
-    for bar in (1, 2):
-        tb = s0 + (bar - 1) * 2
-        oompah(b, tb, CHB[bar], 0.5, False, 0.34)
-        snare_bar(b, tb, "light", 0.36)
-    b.cues.append((s0, "story: theme A1-A2 light (glock + fife, tuba on 1/3, horns on 2/4, light snare)"))
-    a38 = theme(s0, bars=range(3, 9))
-    melody(b, "glock", a38, 0.5, 12, "glock", -0.35)
-    melody(b, "fife", a38, 0.58, 0, "fife", 0.25)
-    b.add("cymbal", I.cymbal(0.42, _r()), 9.0, 0.0)
-    for bar in range(3, 9):
-        tb = s0 + (bar - 1) * 2
-        oompah(b, tb, CHB[bar], 0.64, True, 0.44, bounce=tb >= 15.0)
-        snare_bar(b, tb, "march", 0.58, steps=range(16) if bar < 8 else range(12))
-    roll(b, 20.5, 20.96, 0.25, 0.55, accent=0.6, at=21.0)
-    b.cues.append((9.0, "full band: theme A3-A8 (cymbal), boots are the bass drum"))
-    b.cues.append((15.0, "tuba switches to bouncing octaves as the bridge starts bouncing"))
-    # vamp: the band waits for the whistler
-    oompah(b, 21.0, ["Bb"] * 4, 0.58, True, 0.38)
-    snare_bar(b, 21.0, "light", 0.45)
-    b.cues.append((21.0, "vamp bar, no melody: room for 'Somebody starts whistling'"))
-
-    # ============ WHISTLE 22.25 - 29.7: one soldier, then the column joins (23.75+), nervous falter at 29.2-29.7
-    w0 = 23.0
-    wn = theme(w0, bars=[1, 2, 3], pickup=True) + [(29.0, 1.0, 84)]
-    joins = [0.0] + list(np.linspace(23.75, 24.75, 8))
-    falters = [29.42, 29.22, 29.3, 29.36, 29.25, 29.5, 29.33, 29.45, 29.28]
-    chorus(b, "whistle", wn, 9, 22, joins=joins, falters=falters, spread=0.8, solo_gain=1.05)
-    b.cues.append((22.25, "solo whistler: 3-note pickup D-Eb-F into theme A on 23.0 (in Bb, on the beat)"))
-    b.cues.append((23.75, "the column joins the whistling (8 more whistlers by 24.75)"))
-    b.cues.append((29.22, "whistlers falter one by one (pitch droops, 29.2-29.7): faces turn nervous"))
-    b.add("cymbal", I.cymbal(0.3, _r()), w0, 0.0)
-    for bar in (1, 2, 3):
-        tb = w0 + (bar - 1) * 2
-        oompah(b, tb, CHB[bar], 0.6 + 0.04 * bar, True, 0.4 + 0.03 * bar)
-        snare_bar(b, tb, "march", 0.52 + 0.06 * bar)
-
-    # ============ TENSION 29 - 33: dominant pedal, chromatic climb, snare drive + roll, DEAD STOP on 33.0
-    oompah(b, 29.0, ["F7"] * 4, 0.7, True, 0.5)
-    snare_bar(b, 29.0, "march", 0.66, steps=range(8))
-    snare_bar(b, 29.0, "drive", 0.55, steps=range(8, 16), cres=0.4)
-    climb = [("F7", 31.0), ("F#o7", 31.5), ("Gm", 32.0), ("G#o7", 32.5)]
-    for i, (c, t) in enumerate(climb):
-        m = CH[c]["oom"][0]
-        for k in range(2):
-            b.add("tuba", I.brass(F(m), 0.2, 0.7 + 0.05 * i, _r(), "tuba"), t + k * 0.25, -0.1)
-        for k, mm in enumerate(CH[c]["pah"]):
-            b.add("pah", I.brass(F(mm), 0.14, 0.5 + 0.05 * i, _r(), "horn"), t + 0.25 + 0.004 * k, 0.32 - 0.12 * k)
-        for k in range(4):
-            b.add("glock", I.glock(F(96 + i), 0.22 + 0.04 * i, _r(), dur=0.5), t + k * Q / 4, -0.35)
-    snare_bar(b, 31.0, "drive", 0.6, steps=range(8), cres=0.5)
-    roll(b, 32.0, 33.0, 0.45, 1.0)
-    stop = np.ones(N)
-    a = ns(32.985)
-    stop[a:a + ns(0.012)] = np.linspace(1, 0, ns(0.012))
-    stop[a + ns(0.012):] = 0
-    for k in b.tr:
-        if k != "whistle":
-            b.tr[k] *= stop[None, :]
-    b.cues.append((29.5, "tension: F7 pedal, tuba eighths, snare drive"))
-    b.cues.append((31.0, "chromatic climb F7 - F#dim7 - Gm - G#dim7, glock ticking 16ths, snare roll crescendo"))
-    b.cues.append((33.0, "DEAD STOP on 'Then,' - music silent through the bolt, the drop and the two-feet-deep joke"))
-    late = {}
-
-    # ============ SWAY 43.4 - 47.3: warm pad + vibes pendulum on the bridge's own 0.7 Hz sway (beats at the extremes)
-    sway_beats = [43.4 + (0.25 + k / 2) / 0.7 for k in range(5)]
-    trem = lambda t0: (lambda t: 1 + 0.1 * np.sin(2 * np.pi * 0.7 * (t + t0 - 43.4)))
-    chords = [(43.3, 44.47, [46, 58, 62, 65]), (44.47, 45.9, [46, 55, 63, 67]), (45.9, 46.61, [46, 58, 62, 65]), (46.61, 47.4, [41, 57, 60, 63])]
-    for (ta, tb_, ms) in chords:
-        b.add("pad", I.pad([F(m) for m in ms], tb_ - ta, 0.55, _r(), att=0.5 if ta < 43.5 else 0.25, rel=0.6, trem=trem(ta)), ta, 0.0)
-    for (ta, tb_, ms) in chords:
-        b.add("tuba", I.brass(F(ms[0] - 12 if ms[0] > 40 else ms[0]), tb_ - ta - 0.05, 0.32, _r(), "soft", scoop=-8), ta + 0.05, -0.1)
-    for tb_, m in zip(sway_beats, [86, 82, 87, 82, 84]):
-        b.add("vibes", I.vibes(F(m), 0.5, _r(), dur=1.4, damp=0.7, trem_depth=0.12), tb_, -0.25)
-    b.cues.append((43.43, "warm return: pad Bb - Eb/Bb - Bb - F7, soft low brass, vibes pendulum on each sway extreme (84 bpm)"))
-
-    # ============ SWING 47.24 - 54: music-box waltz, one bar per swing cycle, downbeat = each push
-    bar_t = [T.PUSH0 + (k - 1) * T.SWING_T for k in range(5)]   # 47.24 intro, then the four pushes
-    beat = T.SWING_T / 3
-    ch3 = ["Bb", "Bb", "Eb", "F7", "Bb"]
-    bass = [46, 46, 39, 41, 46]
-    up = [[None, None, 77], [82, 86, 89], [87, 91, 94], [89, 93, 96], [94, None, None]]
-    for k, tb_ in enumerate(bar_t):
-        b.add("pluck", I.pluck(F(bass[k]), 0.8, _r(), dur=1.0), tb_, -0.05)
-        if k < 4:
-            for j in (1, 2):
-                for mm in CH[ch3[k]]["hi"][1:]:
-                    b.add("pluck", I.pluck(F(mm), 0.4, _r(), dur=0.5, bright=0.6), tb_ + j * beat, 0.25)
-        for j, m in enumerate(up[k]):
-            if m:
-                b.add("musicbox", I.musicbox(F(m), 0.62, _r()), tb_ + j * beat, 0.2)
-        if k >= 1:
-            b.add("triangle", I.triangle(0.35, _r()), tb_, 0.35)
-    for j, m in enumerate([98, 101, 106]):  # "higher and higher": music-box run up into the march
-        b.add("musicbox", I.musicbox(F(m), 0.5 + 0.08 * j, _r()), 53.62 + 0.13 * j, 0.2)
-    for (ta, tb_, ms) in [(47.1, 50.34, [58, 62, 65]), (50.34, 51.89, [58, 63, 67]), (51.89, 53.44, [57, 60, 63]), (53.44, 54.05, [58, 62, 65])]:
-        b.add("pad", I.pad([F(m) for m in ms], tb_ - ta, 0.32, _r(), att=0.3, rel=0.4), ta, 0.0)
-    b.cues.append((47.24, "music-box waltz (116 bpm, 3/4): one bar per swing cycle, pizzicato oom-pah-pah"))
-    b.cues.append((48.79, "pushes 48.79 / 50.34 / 51.89 / 53.44 = downbeats (tiny triangle ting), melody climbs each bar"))
-    b.cues.append((53.62, "music-box run up 'higher and higher' into the march"))
-
-    # ============ MARCH 2 54 - 57.5: golden, soft, the column whistles again
-    m2 = theme(54.0, bars=[1, 2])
-    m2 = [n for n in m2 if n[0] < 57.6]
-    chorus(b, "whistle", m2, 6, 54, spread=0.7, vel=0.8, solo_gain=0.8)
-    melody(b, "glock", m2, 0.32, 12, "glock", -0.35)
-    b.add("cymbal", I.cymbal(0.22, _r()), 54.0, 0.0)
-    for bar in (1, 2):
-        tb = 54.0 + (bar - 1) * 2
-        oompah(b, tb, CHB[bar], 0.48, False, 0.32)
-        snare_bar(b, tb, "light", 0.32, steps=range(16) if bar == 1 else range(12))
-    b.cues.append((54.0, "march returns soft and golden, 6 whistlers, theme A1-A2"))
-
-    # ============ RULE 58.9 - 62: snare roll into brass stabs + timpani on the three hammer blows (I - V - I)
-    roll(b, 58.85, 59.77, 0.12, 0.55)
-    roll(b, 60.5, 61.67, 0.1, 0.6)
-    stabs = [(T.HITS[0], [46, 53, 58, 62, 65], 46, 0.7), (T.HITS[1], [41, 53, 57, 60, 65], 41, 0.72), (T.HITS[2], [46, 53, 58, 62, 65, 70], 46, 0.75)]
-    for (th, ms, tm, v) in stabs:
-        for m in ms:
-            b.add("stab", I.brass(F(m), 0.18, v, _r(), "stab", scoop=-12), th, (m - 56) / 22)
-        b.add("timpani", I.timpani(F(tm), v, _r()), th, -0.1)
-    b.add("cymbal", I.cymbal(0.25, _r(), dur=1.2), T.HITS[2], 0.0)
-    b.cues.append((58.85, "snare roll pp-mf into the rule"))
-    b.cues.append((T.HITS[0], "brass stab Bb + timpani on hammer blow 1 ('rule'), F on blow 2 ('Never'), Bb + cymbal on blow 3 ('step')"))
-
-    # ============ TOURISTS 62 - 67.5: lazy swung version, vibes melody laid back, walking pizz bass, brushes
-    tn = theme(62.0, bars=[1, 2], swing=True, late=0.025)
-    tn += [(66.0 + 0.025, Q, 82), (66.5 + 0.025, Q / 2, 77), (66.5 + Q * 2 / 3 + 0.025, Q / 2, 74), (67.0 + 0.02, 0.5, 70)]
-    melody(b, "vibes", tn, 0.6, 0, "vibes", -0.25)
-    walk = [46, 50, 53, 50, 41, 45, 46, 48, 46, 41, 34]
-    for k, m in enumerate(walk):
-        b.add("pluck", I.pluck(F(m), 0.85 if k < 10 else 0.95, _r(), dur=0.9 if k < 10 else 0.6), 62.0 + k * Q, -0.05)
-    for k in range(10):
-        t = 62.0 + k * Q
-        b.add("brush", I.brush(0.55 if k % 2 else 0.35, _r(), dur=0.42, swish=True), t - 0.05, 0.1)
-        b.add("brush", I.brush(0.35, _r()), t + Q * 2 / 3, 0.15)
-    for (t, c) in [(62.5, "Bb"), (63.5, "Bb"), (64.5, "F"), (65.5, "Bb")]:
-        for mm in CH[c]["hi"]:
-            b.add("vibes", I.vibes(F(mm), 0.22, _r(), dur=0.9, damp=0.3, trem_depth=0.2), t + 0.02, 0.3)
-    for mm in [58, 62, 65, 70]:
-        b.add("vibes", I.vibes(F(mm), 0.32, _r(), dur=0.6, damp=None, trem_depth=0.3), 67.0, 0.2)
-    b.add("triangle", I.triangle(0.25, _r(), dur=0.5), 67.0, 0.3)
-    b.cues.append((62.0, "relaxed tourist version: swung, laid-back vibes melody, walking pizzicato bass, brushes"))
-    b.cues.append((67.0, "final Bb chord on 'tourists' (66.72-67.24), rings out, faded to silence at 67.5"))
+    # tail fade so nothing clicks against the end of the picture
     end = np.ones(N)
-    a = ns(67.3)
-    end[a:] = np.linspace(1, 0, N - a) ** 1.5
+    a = ns(T.DUR - 0.45)
+    end[a:] = np.linspace(1, 0, N - a) ** 1.4
     for k in b.tr:
         b.tr[k] *= end[None, :]
+
     return b
 
 
-TARGET = {  # relative balance inside the band (LU, measured on each track's own active span)
-    "whistle": 0.0, "fife": -3.0, "glock": -6.0, "tuba": -2.5, "pah": -7.5, "snare": -5.5, "cymbal": -11.0,
-    "stab": -3.0, "timpani": -5.0, "pad": -3.5, "vibes": -2.0, "musicbox": -1.5, "pluck": -4.0, "brush": -13.0, "triangle": -15.0,
+# relative balance inside the band, LU, measured on each track's own active span
+TARGET = {
+    "pad": -2.0, "pluck": -6.0, "glock": -4.0, "musicbox": -5.0, "vibes": -4.0,
+    "tuba": -2.5, "stab": -3.5, "timpani": -4.0, "cymbal": -12.0, "fife": -7.0,
 }
 
 
 def render(b, ref=-20.0):
-    hall = make_ir(1.5, 7, pre=0.018, hf=1.4)
-    yard = make_ir(0.9, 8, pre=0.008, hf=1.8, early=[(0.11, 0.5, -0.4), (0.19, 0.35, 0.5)])
+    # A long, dark hall: the chamber and the river are both big stone rooms. The tunnel gets the
+    # same room because a brick barrel is also a resonant space, just a dirtier one.
+    hall = make_ir(2.4, 1858, pre=0.022, hf=1.2)
+    wet = np.zeros((2, N))
     dry = np.zeros((2, N))
-    wet_hall = np.zeros((2, N))
-    wet_yard = np.zeros((2, N))
     levels = {}
     for k, x in b.tr.items():
         if not np.any(x):
@@ -380,10 +360,7 @@ def render(b, ref=-20.0):
         x = x * g
         b.tr[k] = x
         dry += x
-        if k == "whistle":
-            wet_yard += 0.16 * x
-        else:
-            wet_hall += b.send[k] * x
-    out = dry + 0.7 * convolve_st(wet_hall.mean(0), hall) + 0.8 * convolve_st(wet_yard.mean(0), yard)
-    out = hp(out, 30, 2)
+        wet += b.send[k] * x
+    out = dry + 0.85 * convolve_st(wet.mean(0), hall)
+    out = hp(out, 32, 2)
     return out, levels

@@ -151,12 +151,21 @@ const S2b = (f: number) => dolly([-7, 23, -38], [2, 15, 48], pushK(f, 140, 0.001
 const S3a = (f: number) => dolly([-100, 55, -65], [50, -2, 5], pushK(f, 220, 0.0013), { fov: 50 });
 const S3b = (f: number) => dolly([-115, 50, -50], [35, -2, 15], pushK(f, 280, 0.0015), { fov: 52, roll: -0.015 });
 // Shot 4: down on the water — "The Thames. It is not water anymore."
-// Shot 4 is "The Thames. It is not water anymore." The old camera stood on the terrace and
-// looked ACROSS the river, which put 40 % embankment wall in the frame and made the water a
-// distant brown band. Now it skims the surface looking ALONG the river: 47 % water, 44 % sky,
-// 8 % wall, and a third of the frame within 6 m, which is close enough for the flotsam to read
-// as debris rather than as noise.
-const S4a = (f: number) => dolly([-50, 1.2, -4], [90, 0.8, -10], pushK(f, 344, 0.0018), { fov: 56 });
+// Shot 4 is "empties into a single river. The Thames." It went through three framings and each
+// failed for a different reason, which is worth recording because the same trap will recur:
+//
+//   1. From the terrace ACROSS the river: 40 % embankment wall, the water a distant brown band.
+//   2. Skimming ALONG the river looking down-stream: 47 % water but 44 % SKY. Down-river there is
+//      nothing to look at — the set ends — so the upper half of a portrait frame is empty blue.
+//      The numbers looked fine ("half the frame is water"); the still did not.
+//   3. Straight DOWN at the surface: 100 % water, a flat beige void with no scale.
+//
+// What works is mid-river looking ACROSS at the far bank, low enough that the surface fills the
+// bottom of the frame and the roofline closes the top: water 44 %, far-bank wall 31 %, sky 22 %.
+// The flotsam lies between camera and bank, so it reads as debris with a shoreline behind it
+// rather than as noise on a blank plane. The push-in travels toward the bank, so the river
+// narrows over the shot.
+const S4a = (f: number) => dolly([-56, 3.4, 14], [0, 5, -45], pushK(f, 344, 0.0018), { fov: 54 });
 // Shot 5: low over the sludge looking up at the Palace — "built directly beside it"
 // Shot 5 is "It is untreated sewage ... Parliament was built directly beside it." Both halves
 // have to be in frame: the sludge AND the building. Low over the water at x = 16 looking back
