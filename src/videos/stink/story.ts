@@ -124,18 +124,21 @@ const dolly = (pos: V3, look: V3, k: number, rest: Partial<Cam> = {}): Shot =>
 // 26 m wall: any camera pointed at it from further than ~20 m renders stone, so every shot that
 // needs the palace keeps the river or the cast in front of it.
 // Shot 1 is the only INTERIOR in the film, and it is built to the line: "you are standing
-// inside the British Parliament, and you cannot breathe." The camera stands at the back of the
-// chamber on the central aisle, at standing eye height, looking down the benches at the window.
-// The window is the whole point — it is the only light, and through it is the river. Standing
-// height (D0 + 1.65) is what makes the room feel like a room rather than a model.
-// The camera stands well back (z = 35, twelve metres from the glass) and HIGH — 2.2 m above the
-// chamber floor — because the frame has to hold the window, and the water in it, together with
-// enough bench to say "this is a room". Measured with tools/sightlines.mjs: this framing puts
-// 29 % water, 23 % wall, 22 % tracery and 26 % sky through the glass. Lower and the benches fill
-// the bottom third; higher and the sill cuts the river off.
+// inside the British Parliament, and you cannot breathe." The window is the whole point — it is
+// the only light, and through it is the river, which is the thing the room cannot escape.
+//
+// The camera stands at the BACK of the room (z = 46, against the back wall at 47) and looks
+// the length of the chamber at the glass at z = 31. That 15 m is the shot: it is what puts the
+// benches, the aisle and the window in one frame. An earlier version stood at z = 35, four
+// metres from the glass and inside the bench rows, so the opening filled the entire frame and
+// the room — the thing the line is about — was behind the camera.
+//
+// y = 9.5 is 3.5 m above the floor. At standing height the benches eat the bottom third; higher
+// and the sill cuts the river out of the glass. Measured with tools/sightlines.mjs: benches
+// 35 %, wall 30 %, water 10 %, sky 15 %, mullion 10 %.
 const CH = { CX: -150, Z1: 47, Z0: 31 };
-const S1a = (f: number) => dolly([CH.CX, 8.2, 35], [CH.CX, 7.8, 18], pushK(f, 0, 0.0016), { fov: 58 });
-const S1b = (f: number) => dolly([CH.CX + 0.9, 8.1, 33], [CH.CX - 0.3, 7.8, 16], pushK(f, 40, 0.0019), { fov: 52, roll: -0.015 });
+const S1a = (f: number) => dolly([CH.CX, 9.5, CH.Z1 - 1], [CH.CX, 7.5, CH.Z0], pushK(f, 0, 0.0016), { fov: 58 });
+const S1b = (f: number) => dolly([CH.CX + 0.8, 9.3, CH.Z1 - 2], [CH.CX - 0.3, 7.3, CH.Z0 + 1], pushK(f, 40, 0.0019), { fov: 54, roll: -0.015 });
 // Shot 2: the reveal — the Palace from across the river, water in the foreground
 const S2a = (f: number) => dolly([0, 26, -26], [0, 13, 48], pushK(f, 77, 0.0016), { fov: 46 });
 const S2b = (f: number) => dolly([-7, 23, -38], [2, 15, 48], pushK(f, 140, 0.0016), { fov: 44, roll: 0.015 });

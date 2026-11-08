@@ -154,6 +154,27 @@ function score(c, people, label) {
   const targets = meshes.concat(people);
   const tally = new Map();
   let sky = 0, near = 0, sumD = 0, n = 0;
+
+  // Is the camera buried in geometry? Cast a few rays BACKWARD: a surface behind the camera and
+  // within 2 m means the camera is inside a wall or a solid block, which renders a valid picture
+  // of nothing at all.
+  //
+  // This does NOT catch the other way a camera can show nothing: standing 4 m from a window
+  // opening so the frame is entirely the opening and the room is behind you. That failure looks
+  // perfectly healthy by every number here — which is why the surface breakdown matters. A shot
+  // that is supposed to be inside a room must show that room's own materials (for the chamber,
+  // `wood` for the floor and benches); if it shows only exterior surfaces, the camera is on the
+  // wrong side of the glass no matter what the percentages say.
+  //
+  // The 0.6 m floor keeps debris lying ON the water (flotsam) from counting: a camera skimming
+  // the surface legitimately has specks within a metre of it.
+  let embedded = false;
+  for (const back of [[0, 0, -1], [0.6, 0, -1], [-0.6, 0, -1], [0, 0.6, -1], [0, -0.6, -1]]) {
+    const d = new THREE.Vector3(...back).normalize().applyQuaternion(cam.quaternion);
+    ray.set(cam.position, d);
+    const h = ray.intersectObjects(meshes, false);
+    if (h.length && h[0].distance > 0.6 && h[0].distance < 2.0) { embedded = true; break; }
+  }
   for (let iy = 0; iy < GRID[1]; iy++) {
     for (let ix = 0; ix < GRID[0]; ix++) {
       const ndc = new THREE.Vector2(((ix + 0.5) / GRID[0]) * 2 - 1, -(((iy + 0.5) / GRID[1]) * 2 - 1));
@@ -174,6 +195,7 @@ function score(c, people, label) {
   const top = [...tally.entries()].sort((a, c2) => c2[1] - a[1])[0] || ["-", 0];
   return {
     id: label,
+    embedded,
     pos: c.pos.map(fmt).join(","),
     top: top[0], topPct: (top[1] / cells) * 100,
     people: ((tally.get("PERSON") || 0) / cells) * 100,
@@ -207,7 +229,11 @@ console.log(`frame shot  camera                 top surf      %fr  ppl  cast  sk
 for (const r of rows) {
   // A shot is only broken when one surface owns most of the frame AND there is nobody in it.
   // A palace wall behind seven Members is a background, not a failure.
-  const bad = r.topPct > 62 && r.people < 6 && r.mean < 30 ? "  <== WALL"
+  // EMBEDDED is checked first and is the most serious: a camera inside a wall, or standing in a
+  // window opening so the opening owns the frame, produces a picture of nothing. It also evades
+  // every other test, because "40 % wall at 30 m" looks like a perfectly reasonable shot.
+  const bad = r.embedded ? "  <== EMBEDDED (camera inside geometry)"
+    : r.topPct > 62 && r.people < 6 && r.mean < 30 ? "  <== WALL"
     : r.sky > 80 ? "  <== EMPTY"
     : r.mean < 7 && r.people < 12 ? "  <== TOO CLOSE" : "";
   console.log(
