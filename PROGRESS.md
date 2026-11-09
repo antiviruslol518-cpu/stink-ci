@@ -88,6 +88,48 @@ Two checks that the fix cannot change how anything *looks*:
 - the whole set is still only 18.6 k vertices and Batch merges one mesh per material, so the
   draw-call count is unchanged.
 
+## Frame 601, part 3: the 16x8 grid fixed the seam but INKED its own boundary
+The subdivision worked — the cream banding and the triangle-diagonal seam are gone. But at
+scale 0.6 the pair difference at rows 1124-1132 was still non-zero, and looking at the frame
+showed a 9-row black band across the full width, on 601 only.
+
+**Bisected it in three stills runs on the fixed commit (600/601/602 at 0.6):**
+
+| variant | band at rows 1124-1132, 601 vs both neighbours |
+|---|---|
+| shadows off | **-45.5 grey** — still there |
+| ink off | **-0.8** — gone |
+| no post | **-0.9** — gone |
+
+So it is **InkPass**, not a shadow.
+
+**Why.** The band sits at row 1127, which the real camera code projects to floor z = 34.23 —
+exactly the far edge of the FIRST z-strip of `faceGrid(16, 8)` (z = 30 + 34.25/8 = 34.25).
+Two things make that boundary special:
+
+1. A grid boundary at constant z is a **constant-depth line**, and `InkPass`'s edge test is a
+   signed second difference of 1/z — it fires precisely where depth is discontinuous. The other
+   z-boundaries (38.5, 42.75) measured +0.3, i.e. clean; only the 4 m one inked.
+2. That first strip **contains the shot-6 camera** (z = 30.25, the strip spans 30..34.25), so its
+   triangles are clipped by the near plane and the strip's far boundary reads as a silhouette.
+
+The darkening is multiplicative across all three channels (187->81, 124->66, 75->41), which is
+what an ink blend does — it is not a colour shift and not a geometry gap.
+
+**Fixed** (commit `142659c`): subdivide **along x only**. Every boundary is then perpendicular
+to the depth gradient and cannot ink. The defect the grid exists to fix was the 510 m
+*x*-extent; the 34 m z-extent was already there pre-fix with no artifact.
+
+Verified on the terrace floor: exactly affine uv at 4.000 m/uv on both axes (max residual
+2.8e-14 over 130 vertices), watertight (4 corner + 128 edge + 63 interior vertices, zero
+count-3 positions), longest edge 34.92 m, and only **two** z values on the whole floor
+(30, 64) — no z-boundary left to ink. Same treatment for both far-bank faces.
+
+Also subdivided the **sewer floor** (commit `8f1bc92`): shot 10 looks down a 70 m x 10.4 m
+two-triangle quad from 2.6 m above it at a grazing angle, the same regime. 14 strips along x,
+longest edge 70.8 -> 11.54 m, uv identical to the original flipped mapping at 2.55e-8 (the
+brick scale is unchanged), still no z-boundary.
+
 ## Open work
 1. ~~Decide frame 601~~ — fixed; needs a full re-render (every shot sees the terrace floor).
 2. ~~Teach `shots.json` about the kicks~~ — done in `ce54c39`, which postdates the delivered
