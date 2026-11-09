@@ -192,24 +192,26 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
   // -420..420. Keeping the extension one-sided fixes the sky without touching the interior.
   const BANK_X = 420;
   // ground behind the parapet
-  // 510 m x 34 m as ONE two-triangle quad drew a visible seam down its triangle diagonal on
-  // frame 601. Subdivide along x ONLY (64 strips -> 8 m x 34 m, longest edge 34.9 m).
+  // 64 x 4 -> 8 m x 8.5 m, longest edge 11.7 m.
   //
-  // WHY NOT ALSO ALONG Z: a 16 x 8 grid fixed the seam but drew a new ink line at z = 34.25,
-  // the far edge of the FIRST z-strip. That strip (z 30..34.25) contains the shot-6 camera
-  // (z = 30.25), so its triangles run behind the near plane and get clipped; the ink pass reads
-  // the depth edge at the strip's far boundary as a silhouette and draws a 9 px black band
-  // there (measured: -45.5 grey vs both neighbours; the other z-boundaries at 38.5 and 42.75
-  // read +0.3, i.e. clean). Verified by bisect: the band survives shadows off (-45.5) and
-  // vanishes with ink off (-0.8) or no-post (-0.9), so it is ink, not a shadow.
+  // WHY BOTH AXES. x-only subdivision (64 x 1, 8 m x 34 m strips) left the ORIGINAL defect
+  // in place: on frame 601 a horizontal band of the terrace (rows 528-767 at 0.6 scale) is
+  // not drawn, so the palace wall behind it shows through over the characters (+17.1 grey vs
+  // both neighbours, peak +39.6). Splitting z as well removes it (the 16 x 8 grid measured
+  // -0.0). That is a per-triangle rasterisation defect, so the triangles have to be small in
+  // BOTH axes; 34 m-long strips are not small enough.
   //
-  // Subdividing x only keeps every boundary out of the camera's own z-strip, and the defect
-  // the grid exists to fix was the 510 m x-extent, not the 34 m z-extent (which the pre-fix
-  // floor already had, with no artifact). 64 x 1 keeps the longest edge at 34.9 m.
-  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 64, 1)) b.add(g, M.cobble);
+  // WHY nv = 4 AND NOT 8. A z-boundary is a constant-depth line, and InkPass's edge test is a
+  // signed second difference of 1/z, so a boundary close to the camera can ink. Measured on the
+  // 16 x 8 grid: the boundary at z = 34.25 (4 m from the shot-6 camera at z = 30.25, and the
+  // far edge of the strip the camera sits inside) drew a 9-row black band, -45.5 grey vs both
+  // neighbours; the boundaries at 38.5 (8.25 m) and 42.75 (12.5 m) measured +0.3, i.e. clean.
+  // nv = 4 puts the boundaries at exactly 38.5 / 47 / 55.5 -- all in the clean set, none
+  // within 8 m of a camera -- while still cutting the strips to 8.5 m.
+  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 64, 4)) b.add(g, M.cobble);
   // embankment wall down to the water (its face looks out over the river, toward -z).
-  // nv = 1 for the same reason: the y 6..2 strip contains the river-level cameras (y 3.0-3.5),
-  // so a boundary at y = 2 would ink the wall in shots 4 and 5 exactly as z = 34.25 did here.
+  // nv = 1 is enough here: the face is only 8 m tall, so its triangles are already small in the
+  // y axis, and an extra y-boundary would only add a constant-depth line to ink.
   for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER, uvSpan(BANK_X + 90), uvSpan(D0 + 2), 64, 1)) b.add(g, M.wall);
   // parapet with coping
   b.add(boxGeo(V(-90, D0, QUAY - 0.9), V(90, D0 + 1.05, QUAY), 2), M.wall);
