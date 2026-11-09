@@ -424,7 +424,7 @@ export class InkPass extends Pass {
       }
       // console.warn, not log: tools/still.mjs runs Remotion at logLevel "warn", so a plain
       // console.log from the page is dropped before it reaches the CI log.
-      console.warn(`INKPROBE term4 ${w}x${h} x[${p.x0},${p.x1}) rows[${p.row0},${p.row1}) depth(m):\n${out.join("\n")}`);
+      console.warn(`INKPROBE ${JSON.stringify({ w, h, x0: p.x0, row0: p.row0, row1: p.row1, depth: out })}`);
     }
 
     // 3) composite into a temp target, 4) copy back into the input buffer (colour only; depth untouched)

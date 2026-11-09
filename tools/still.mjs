@@ -66,6 +66,14 @@ for (const f of frames) {
     // The first still pays shader compile for the whole post chain. Remotion's default
     // page-function timeout is 30 s, which a three.js scene blows past on software WebGL.
     timeoutInMilliseconds: Number(process.env.STILL_TIMEOUT_MS || 180000),
+    // Forward PAGE console output to this process. Without it a diagnostic printed from a
+    // shader path never leaves the headless browser, and the only way to read a number out of
+    // the render is to encode it into the PNG — which the tone/grade chain then destroys.
+    onBrowserLog: (log) => {
+      if (log.type === "warning" || log.type === "error" || /INKPROBE|PROBE/.test(log.text)) {
+        console.log(`[page:${log.type}] ${log.text}`);
+      }
+    },
   });
   const size = fs.statSync(out).size;
   // A BLANK frame costs the same bytes as a drawn one — but a near-empty PNG (tiny size
