@@ -178,8 +178,13 @@ void main() {
       // A depth step between two points ON THE SAME PLANE is not an edge, so suppress it: measure
       // how far the neighbour lies off our tangent plane. A true silhouette (a figure standing on
       // the ground) is centimetres to metres off it; a triangulation seam is millimetres.
+      //
+      // The ramp is capped at 6 cm. Uncapped it scales with distance and would reach 1.8 m at
+      // 90 m, which is large enough to swallow real silhouettes in the wide shots; the seam it
+      // exists to remove is a sub-millimetre interpolation mismatch, so 6 cm is already ~100x
+      // the thing being suppressed while staying well under any real object.
       float off = max(abs(dot(viewPos(vUv - o, z1) - P0, n0)), abs(dot(viewPos(vUv + o, z2) - P0, n0)));
-      eD = max(eD, smoothstep(depthLo, depthHi, -s) * cw * smoothstep(0.004 * zc, 0.02 * zc, off));
+      eD = max(eD, smoothstep(depthLo, depthHi, -s) * cw * smoothstep(min(0.004 * zc, 0.015), min(0.02 * zc, 0.06), off));
       // crease: normal turns towards a neighbour at the same depth
       if (ch > 0.0) eN = max(eN, max(crease(n0, P0, zc, vUv - o, z1), crease(n0, P0, zc, vUv + o, z2)) * ch);
     }
