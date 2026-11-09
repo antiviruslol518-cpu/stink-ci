@@ -40,9 +40,13 @@ on:
         required: false
         default: ""
       prior_run:
-        description: "Optional run id to take the chunks only_chunks did NOT render from, e.g. 42494165817."
+        description: "Optional run id(s) to take the chunks only_chunks did NOT render from. Comma-separated, tried in order, e.g. '42494165817' or '42524562270,42494165817'."
         required: false
         default: ""
+      stitch_only:
+        description: "If true, skip the render entirely and stitch from artifacts (needs prior_run). Use after a render that succeeded but failed at the stitch step."
+        required: false
+        default: "false"
 
 concurrency:
   group: render-${{ github.ref }}
@@ -140,7 +144,9 @@ jobs:
 
   render:
     needs: prep
-    if: github.event.inputs.probe_only != 'true'
+    # stitch_only: the chunks already exist as artifacts, so rendering them again would
+    # spend hours to produce the same bytes. Skip straight to the stitch.
+    if: github.event.inputs.probe_only != 'true' && github.event.inputs.stitch_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
@@ -222,44 +228,61 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
       - uses: actions/download-artifact@v4
+        # stitch_only renders nothing, so this run has no chunk artifacts of its own and the
+        # step would fail on "no artifacts found". Skipping is safe: the prior-run pull below
+        # is what supplies every chunk in that mode.
+        if: github.event.inputs.stitch_only != 'true'
         with:
           pattern: chunk-*
           path: dl
 
       # A subset re-render (only_chunks) produces only the chunks it was asked for. The rest
-      # of the film already exists as artifacts on the earlier run, and because the fix
+      # of the film already exists as artifacts on an earlier run, and because the fix
       # removed only a non-rendering prop, those frames are pixel-identical. Pull them into
       # the SAME dl/ tree; the stitch below sorts by index and cannot tell them apart.
       #
-      # This is the step a 3-hour run would be lost to if it went wrong, so it FAILS LOUDLY
-      # rather than shrugging: a swallowed error here surfaces later as a confusing
-      # "chunk-N artifact has no chunk_N.mp4" or, worse, a short film.
-      - name: pull the untouched chunks from the prior run
+      # prior_run accepts a COMMA-SEPARATED list, tried in order per missing chunk: a partial
+      # re-render means the chunks you need are spread over more than one run.
+      - name: pull the untouched chunks from the prior run(s)
         if: github.event.inputs.prior_run != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUN: ${{ github.event.inputs.prior_run }}
+          RUNS: ${{ github.event.inputs.prior_run }}
         run: |
           set -euo pipefail
           mkdir -p dl
-          HAVE=$(ls -d dl/chunk-* 2>/dev/null | sed 's#.*/chunk-##' | sort -n || true)
+          # Space-separated, NOT newline-separated: `case " $HAVE " in *" $i "*)` can only
+          # match a space-delimited list. Newlines here silently re-download every chunk
+          # into a directory that already holds its files, and the zip extract fails with
+          # "file exists" — which is exactly how the first attempt at this step died.
+          have() { ls -d dl/chunk-* 2>/dev/null | sed 's#.*/chunk-##' | sort -n | tr '\n' ' ' || true; }
+          HAVE=$(have)
           echo "this run produced: ${HAVE:-<none>}"
-          # ask the prior run what it actually has, instead of guessing a range
-          WANT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/artifacts" \
-                   --paginate -q '.artifacts[].name' | sed -n 's/^chunk-//p' | sort -n)
-          echo "prior run has: $(echo $WANT)"
-          [ -n "$WANT" ] || { echo "::error::prior run $RUN has no chunk-* artifacts"; exit 1; }
-          PULLED=0
-          for i in $WANT; do
-            case " $HAVE " in *" $i "*) continue;; esac
-            if gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n "chunk-$i" -D "dl/chunk-$i"; then
-              PULLED=$((PULLED + 1))
-            else
-              echo "::error::failed to download chunk-$i from run $RUN"; exit 1
-            fi
+          for RUN in $(echo "$RUNS" | tr ',' ' '); do
+            [ -n "$RUN" ] || continue
+            echo "== prior run $RUN"
+            WANT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/artifacts" \
+                     --paginate -q '.artifacts[].name' | sed -n 's/^chunk-//p' | sort -n)
+            [ -n "$WANT" ] || { echo "::warning::run $RUN has no chunk-* artifacts"; continue; }
+            for i in $WANT; do
+              case " $HAVE " in *" $i "*) continue;; esac
+              rm -rf "dl/chunk-$i"
+              if ! gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n "chunk-$i" -D "dl/chunk-$i"; then
+                echo "  chunk-$i: download failed on run $RUN — will try another run"
+                rm -rf "dl/chunk-$i"; continue
+              fi
+              # An artifact can EXIST but be empty: a chunk that died still uploads its log.
+              # Accept it only if the mp4 is really there, or a later run would be skipped.
+              if find "dl/chunk-$i" -name "chunk_$i.mp4" -type f | grep -q .; then
+                echo "  chunk-$i: pulled from $RUN"
+                HAVE=$(have)
+              else
+                echo "  chunk-$i: run $RUN has no mp4 (empty artifact) — trying another run"
+                rm -rf "dl/chunk-$i"
+              fi
+            done
           done
-          echo "pulled $PULLED chunk(s) from run $RUN"
-          echo "after pull:"; ls -d dl/chunk-* | sed 's#.*/chunk-##' | sort -n | tr '\n' ' '; echo
+          echo "after pull: $(have)"
 
       - name: stitch
         run: |
