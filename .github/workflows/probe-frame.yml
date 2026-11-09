@@ -105,6 +105,8 @@ jobs:
             'aniso16|{"post":{"aniso":16}}'
             'aniso1|{"post":{"aniso":1}}'
             'nomip|{"post":{"noMip":true}}'
+            'no-cast|{"post":{"cast":false}}'
+            'no-world|{"post":{"world":false}}'
           )
           for v in "${variants[@]}"; do
             name="${v%%|*}"; props="${v#*|}"
@@ -172,14 +174,16 @@ jobs:
               rows.append((v, fr, dm, dh, ratio))
           if not rows:
               print("need two frames per variant (set the `control` input)"); raise SystemExit(0)
-          # the noise floor is the spread of d_mean across variants that share the SAME
-          # underlying frame content; use the smallest |d_mean| as the reference "no artifact"
-          base = min(abs(r[2]) for r in rows)
+          # The floor below the seam is smooth on the bad frame, so "d_hf < 0" (601 LESS sharp)
+          # is the signature, not "601 sharper". A variant that fixes the artifact must make the
+          # pair look alike on BOTH mean and sharpness. Absolute thresholds are wrong here: they
+          # move with the content itself. Report the pair difference and let a human read it.
           for v, fr, dm, dh, ratio in rows:
-              verdict = "FIXED" if abs(dm) <= max(base * 1.5, 1.0) else "still broken"
-              print(f"{v:<10} {str(fr):<12} {dm:8.2f} {dh:8.3f} {ratio:9.2f}  {verdict}")
+              print(f"{v:<10} {str(fr):<12} {dm:8.2f} {dh:8.3f} {ratio:9.2f}")
           print()
-          print(f"smallest |d_mean| across variants = {base:.2f} (the run's own noise floor)")
+          print("A variant FIXES the artifact only if d_mean AND d_hf both collapse toward 0.")
+          print("no-world must be near 0 by construction; no-cast removes the characters, so its")
+          print("d_mean must stay large (the floor still differs) unless the cast is the cause.")
           PY
 
       - name: "UV density — every big flat quad must tile its texture"

@@ -25,8 +25,8 @@ export const BRIDGE_FRAMES = TOTAL;
 /** A/B switches for test stills only (Remotion inputProps `{ post: { ink: false, ... } }`); everything is on by default.
  *  `shadows` is here because the frame-601 banding is the signature of shadow-map acne on a grazing ground
  *  plane: turning the sun's shadow off is the one test that separates acne from a texture/mip problem. */
-type PostToggles = { ink: boolean; lens: boolean; pre: boolean; bloom: boolean; grade: boolean; grain: boolean; shadows: boolean; cast: boolean; aniso: number; noMip: boolean };
-const toggles = (): PostToggles => ({ ink: true, lens: true, pre: true, bloom: true, grade: true, grain: false, shadows: true, cast: true, aniso: 0, noMip: false, ...((getInputProps() as { post?: Partial<PostToggles> }).post ?? {}) });
+type PostToggles = { ink: boolean; lens: boolean; pre: boolean; bloom: boolean; grade: boolean; grain: boolean; shadows: boolean; cast: boolean; world: boolean; aniso: number; noMip: boolean };
+const toggles = (): PostToggles => ({ ink: true, lens: true, pre: true, bloom: true, grade: true, grain: false, shadows: true, cast: true, world: true, aniso: 0, noMip: false, ...((getInputProps() as { post?: Partial<PostToggles> }).post ?? {}) });
 
 /** Bloom for emissive sources only (depth.md 6.4). Its MIP chain always starts at 540x960 (half of 1080x1920),
  *  whatever the output size, so the glow keeps the same size relative to the frame (e-fold ~30 px at 1080p,
@@ -100,7 +100,11 @@ const Inner: React.FC<{ id: number; kit: Kit }> = ({ id, kit }) => {
   fx.grain.seed = f; // deterministic per frame
   return (
     <>
-      <primitive object={world.root} />
+      {/* `world:false` hides the static set while leaving the cast, post chain and camera in place. The
+          601 artifact survives every post pass being switched off, so the next question is whether it is
+          the set at all: with the set hidden, the floor and the characters must both go, and whatever is
+          still drawn is the thing drawing it. */}
+      <primitive object={world.root} visible={on.world} />
       {post}
     </>
   );
