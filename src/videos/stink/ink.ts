@@ -170,7 +170,16 @@ void main() {
       float z1 = dist(tDepth, vUv - o), z2 = dist(tDepth, vUv + o);
       // depth jump: this pixel is in front of its neighbours (2nd difference of 1/z < 0; exactly 0 on planes)
       float s = (1.0 / z1 + 1.0 / z2 - 2.0 * Wc) / Wc;
-      eD = max(eD, smoothstep(depthLo, depthHi, -s) * cw);
+      // COPLANAR GUARD. The 2nd difference above is exactly 0 on an ideal plane, but two separate
+      // triangles meeting at a shared edge interpolate depth independently, and the mismatch is a
+      // real (if sub-millimetre) discontinuity -- which this test reports as a silhouette. On a
+      // grazing floor that drew a black line across the frame wherever the ground mesh was
+      // subdivided (measured on the terrace floor's z = 34.25 sub-quad boundary, frame 601).
+      // A depth step between two points ON THE SAME PLANE is not an edge, so suppress it: measure
+      // how far the neighbour lies off our tangent plane. A true silhouette (a figure standing on
+      // the ground) is centimetres to metres off it; a triangulation seam is millimetres.
+      float off = max(abs(dot(viewPos(vUv - o, z1) - P0, n0)), abs(dot(viewPos(vUv + o, z2) - P0, n0)));
+      eD = max(eD, smoothstep(depthLo, depthHi, -s) * cw * smoothstep(0.004 * zc, 0.02 * zc, off));
       // crease: normal turns towards a neighbour at the same depth
       if (ch > 0.0) eN = max(eN, max(crease(n0, P0, zc, vUv - o, z1), crease(n0, P0, zc, vUv + o, z2)) * ch);
     }
