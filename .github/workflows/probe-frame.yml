@@ -106,36 +106,108 @@ jobs:
 
       - name: compare variants
         run: |
-          # The artifact is a set of horizontal cream bands across the terrace floor. The
-          # discriminator is EDGE: the mean absolute vertical gradient in the lower 45 % of
-          # the frame. A smooth floor is a gentle gradient; banding is a row of hard steps.
+          # The artifact is a set of horizontal cream bands across the terrace floor.
           #
-          # Calibrated on the real frames (scale 0.6 stills of 599-603):
-          #   clean  599/600/602/603 -> 1.401 1.414 1.412 1.399
-          #   BAD    601             -> 2.327   (max 2nd-diff 7.66 vs 4.1-4.4 on clean frames)
-          # A row-mean second difference was tried first and did NOT separate them (0.434 vs
-          # 0.37-0.40) — it averages away exactly the full-width steps we are looking for.
+          # THE FIRST TWO METRICS WERE WRONG, both by using an ABSOLUTE threshold on a number
+          # that also moves with sharpness. The mean vertical gradient called frame 600's CLEAN
+          # no-lens / no-post variants "BANDING" (2.02 / 2.01 vs a 1.8 threshold). A max-row-jump
+          # metric did the same thing (601 no-lens 48.35 vs 601 all 13.26 — the lens merely
+          # smoothed it). Neither was measuring banding.
+          #
+          # What works is SELF-CALIBRATING: compare each frame's floor row-profile to the MEDIAN
+          # of its neighbours and divide by the neighbours' own spread. No absolute threshold, so
+          # resolution, codec, scale and lens softness all cancel. Measured on the real frames:
+          #   599 600 602 603 -> z = 0.76 -0.67 -0.13 0.00
+          #   601             -> z = 34.99
+          # That is a clean 35-sigma separation, and it is the number this step now reports.
           python3 - <<'PY' | tee out/variants.txt
-          import glob, subprocess, os
+          import glob, re, os, subprocess
           import numpy as np
           files = sorted(glob.glob("out/stills/*.png"))
           if not files:
               print("no stills produced"); raise SystemExit(0)
-          print(f"{'variant':<10} {'size':>10} {'edge':>7} {'maxD2':>7}  verdict")
-          for p in files:
+          def prof(p):
               raw = subprocess.run(["ffmpeg","-v","error","-i",p,"-f","rawvideo","-pix_fmt","rgb24","-"],
                                    capture_output=True).stdout
               info = subprocess.run(["ffprobe","-v","error","-show_entries","stream=width,height",
                                      "-of","csv=p=0",p], capture_output=True, text=True).stdout.strip()
               w, h = (int(x) for x in info.split(","))
               F = np.frombuffer(raw, np.uint8).reshape(h, w, 3).astype(np.float32)
-              low = F[int(h * 0.55):].mean(axis=-1)          # luma of the terrace floor
-              edge = float(np.abs(np.diff(low, axis=0)).mean())
-              maxd2 = float(np.abs(np.diff(low.mean(1), 2)).max())
-              name = os.path.basename(p).replace(".png", "").split("__")[-1]
-              verdict = "BANDING" if edge > 1.8 else "clean"
-              print(f"{name:<10} {w}x{h:<6} {edge:7.3f} {maxd2:7.3f}  {verdict}")
+              low = F[int(h * 0.55):].mean(axis=-1)
+              return low.mean(axis=1)
+          items = [(re.search(r"f_(\d+)", os.path.basename(p)).group(1),
+                    os.path.basename(p).replace(".png","").split("__")[-1], p) for p in files]
+          items.sort()
+          P = {p: prof(p) for _,_,p in items}
+          n = min(len(v) for v in P.values())
+          print(f"{'frame':>6} {'variant':<10} {'dev':>8} {'z':>7}")
+          for i,(f,v,p) in enumerate(items):
+              nb = [P[q][:n] for (f2,v2,q) in items if q != p]
+              med = np.median(np.stack(nb), axis=0)
+              dev = float(np.sqrt(((P[p][:n] - med)**2).mean()))
+              # z against the OTHER frames at this same variant, so a variant is judged
+              # only against its peers and not against the control
+              peers = [q for (f2,v2,q) in items if v2 == v and q != p]
+              if len(peers) >= 3:
+                  ds = []
+                  for q in peers:
+                      nb2 = [P[r][:n] for r in P if r != q]
+                      m2 = np.median(np.stack(nb2), axis=0)
+                      ds.append(float(np.sqrt(((P[q][:n] - m2)**2).mean())))
+                  med_d = float(np.median(ds)); mad = float(np.median(np.abs(np.array(ds)-med_d))) or 1e-6
+                  z = (dev - med_d)/(1.4826*mad)
+              else:
+                  z = float("nan")
+              print(f"{f:>6} {v:<10} {dev:8.3f} {z:7.2f}")
           PY
+
+      - name: "UV density — every big flat quad must tile its texture"
+        run: |
+          # A quad that keeps the default 0..1 UVs over a 500 m face stretches one texel over
+          # metres and puts the sampler in a degenerate regime. This catches the class of bug
+          # that produced frame 601, on ANY face, without rendering.
+          node - <<'JS' | tee out/uvcheck.txt
+          const THREE = await import("three");
+          const { build } = await import("esbuild");
+          const load = async (rel) => {
+            const r = await build({ entryPoints: [rel], bundle: true, write: false, format: "esm",
+              platform: "neutral", target: "es2020", logLevel: "silent" });
+            return import("data:text/javascript;base64," + Buffer.from(r.outputFiles[0].text).toString("base64"));
+          };
+          const parl = await load("src/videos/stink/parliament.ts");
+          const named = (n) => ({ name: n, __name: n, isMaterial: true });
+          const M = {}; for (const n of ["cobble","wall","cope","tower","brick","brickDark","iron","steel","wood"]) M[n] = named(n);
+          // quad() emits [a,b,c, a,c,d], so triangle 0's edge a->b IS the quad's first edge.
+          // Measuring along that edge gives a true metres-per-tile; an earlier version compared
+          // both uv axes against max(span) and mislabelled the corrected floor as degenerate.
+          const edges = [];
+          const b = { add: (g, m) => {
+            const p = g.attributes.position.array, uv = g.attributes.uv.array;
+            for (let i = 0; i < p.length; i += 9) {
+              const A = [p[i], p[i+1], p[i+2]], Bq = [p[i+3], p[i+4], p[i+5]];
+              const uvA = [uv[(i/3)*2], uv[(i/3)*2+1]], uvB = [uv[(i/3+1)*2], uv[(i/3+1)*2+1]];
+              const len = Math.hypot(Bq[0]-A[0], Bq[1]-A[1], Bq[2]-A[2]);
+              const du = Math.hypot(uvB[0]-uvA[0], uvB[1]-uvA[1]);
+              if (du < 1e-9) continue;
+              edges.push({ mat: m.__name, len, du });
+            }
+          } };
+          parl.terrace(b, M);
+          parl.farBank(b, M);
+          // one uv unit = 4 m for cobbleHD (2048 px = 8 m at repeat 0.5)
+          const M_PER_UV = 4.0;
+          let bad = 0;
+          const seen = new Set();
+          for (const q of edges) {
+            const tile = q.len / (q.du * M_PER_UV);   // metres of surface per texture tile
+            if (tile > 40 && !seen.has(q.mat + tile.toFixed(0))) {
+              seen.add(q.mat + tile.toFixed(0));
+              console.log(`  ${q.mat}: one texture tile spans ${tile.toFixed(0)} m along a ${q.len.toFixed(0)} m edge (uv ${q.du.toFixed(3)}) — DEGENERATE`);
+              bad++;
+            }
+          }
+          console.log(bad ? `uvcheck: ${bad} degenerate edge(s)` : "uvcheck: all large faces tile their texture");
+          JS
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -39,10 +39,24 @@ export type PalaceOpts = { lit: number; lime: boolean };
  * and both embankment walls. Always say which way a face should look instead of hoping the
  * winding is right.
  */
-function face(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, dir: THREE.Vector3) {
+function face(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, dir: THREE.Vector3, u1 = 1, v1 = 1) {
   const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a));
-  return n.dot(dir) >= 0 ? quad(a, b, c, d) : quad(a, d, c, b);
+  return n.dot(dir) >= 0 ? quad(a, b, c, d, u1, v1) : quad(a, d, c, b, u1, v1);
 }
+
+/**
+ * UV span for a face of `metres` metres, in the units cobbleHD/stoneHD are drawn in.
+ *
+ * WHY THIS EXISTS: `quad()` defaults to UV 0..1 over the WHOLE face, which is only right for a
+ * small object. The terrace floor is 510 m x 50 m, so 0..1 gave 2.0 texels/m along x and 20.5
+ * along z — a 10:1 anisotropic stretch with one cobble course 21 m wide. That is what made the
+ * floor read as broad soft bands instead of stone, and it left the sampler in a degenerate
+ * magnification regime where frame 601 of the film flipped to a different (brighter, sharper)
+ * result for exactly one frame while 600 and 602 did not.
+ *
+ * paint.ts documents cobbleHD as "2048 px = 8 m shown at repeat 0.5", i.e. one uv unit is 4 m.
+ */
+const uvSpan = (metres: number) => metres / (8.0 * 0.5);
 const DOWN_RIVER = V(0, 0, -1); // palace side: the river is at lower z
 const UP_RIVER = V(0, 0, 1);    // far bank: the river is at higher z
 const UP = V(0, 1, 0);
@@ -132,9 +146,9 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
   // -420..420. Keeping the extension one-sided fixes the sky without touching the interior.
   const BANK_X = 420;
   // ground behind the parapet
-  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP), M.cobble);
+  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY)), M.cobble);
   // embankment wall down to the water (its face looks out over the river, toward -z)
-  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER), M.wall);
+  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER, uvSpan(BANK_X + 90), uvSpan(D0 + 2)), M.wall);
   // parapet with coping
   b.add(boxGeo(V(-90, D0, QUAY - 0.9), V(90, D0 + 1.05, QUAY), 2), M.wall);
   b.add(boxGeo(V(-90, D0 + 1.05, QUAY - 1.05), V(90, D0 + 1.3, QUAY + 0.05), 2), M.cope);
@@ -164,8 +178,8 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
  * Its wall faces +z (back toward the palace); its ground runs away to -z.
  */
 export function farBank(b: Batch, M: Record<string, THREE.Material>) {
-  b.add(face(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, D0, -150), V(-260, D0, -150), UP), M.cobble);
-  b.add(face(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, -2, -QUAY), V(-260, -2, -QUAY), UP_RIVER), M.wall);
+  b.add(face(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, D0, -150), V(-260, D0, -150), UP, uvSpan(520), uvSpan(120)), M.cobble);
+  b.add(face(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, -2, -QUAY), V(-260, -2, -QUAY), UP_RIVER, uvSpan(520), uvSpan(D0 + 2)), M.wall);
 
   // three rows, each further back and taller, so the skyline has depth instead of one flat band
   const rows: { z: number; h0: number; dh: number; w: number }[] = [
