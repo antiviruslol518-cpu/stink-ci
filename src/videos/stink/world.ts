@@ -76,7 +76,7 @@ export class World {
    *  floor drawing OVER the Members' lower halves while their heads stay identical, so the question is
    *  whether the depth/occlusion flip needs the cast at all: with no characters and no contact blobs the
    *  floor is the only thing in the lower frame, and the frame either changes or it does not. */
-  constructor(kit: Kit, opts?: { shadows?: boolean; cast?: boolean }) {
+  constructor(kit: Kit, opts?: { shadows?: boolean; cast?: boolean; aniso?: number; noMip?: boolean }) {
     const R = this.root, M: Mats = {};
     // ---- sky + light ----
     // sky: 5 colour stops by elevation (textures.md 5.2 #5 + depth.md 2/6.5), written as tone-map-inverted linear values
@@ -135,6 +135,28 @@ export class World {
     const PM: Mats = { ...M };
     PM.brick = lam("brickHD", () => ({ map: stoneHD("brickHD", ["#8a5a44", "#7d4f3b", "#95634c", "#734837"], "#5d3a2c") }));
     PM.brickDark = lam("brickDark", () => ({ color: "#5a382b" }));
+    // ---- test switches for the frame-601 LOD flip (Bridge's `post.aniso` / `post.noMip`) ----
+    // The artifact is confined to the terrace floor, which this shot sees at a ~670:1 grazing
+    // UV ratio; it is SHARPER and brighter on 601 than on its neighbours, then snaps back, and
+    // the wall in the same frame is bit-identical. That is minification filtering, not geometry.
+    // `aniso` forces an anisotropy level on every texture (0 = leave the painted default);
+    // `noMip` drops mipmaps entirely so the sampler must do pure minification. If either makes
+    // 601 match 600, the LOD selection is the bug and the fix is in the texture setup, not the set.
+    if (opts?.aniso !== undefined || opts?.noMip) {
+      const seen = new Set<THREE.Texture>();
+      const fix = (mat: THREE.Material) => {
+        const m = mat as THREE.MeshLambertMaterial;
+        if (!m.map || seen.has(m.map)) return;
+        seen.add(m.map);
+        if (opts?.aniso !== undefined) m.map.anisotropy = opts.aniso;
+        if (opts?.noMip) {
+          m.map.generateMipmaps = false;
+          m.map.minFilter = THREE.LinearFilter;
+        }
+        m.map.needsUpdate = true;
+      };
+      for (const k of Object.keys(PM)) fix(PM[k]);
+    }
     terrace(b, PM);
     palace(b, PM, PARLIAMENT.PALACE_Z, { lit: 1, lime: false });
     farBank(b, PM);

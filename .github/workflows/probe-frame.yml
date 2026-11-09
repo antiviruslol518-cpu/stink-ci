@@ -20,6 +20,10 @@ on:
         description: "Frame to probe"
         required: false
         default: "601"
+      control:
+        description: "Neighbour frame rendered at every variant as the control (empty = none). Comparing a frame to its own neighbours in the SAME run is the only way to tell 'changed' from 'was always like that'."
+        required: false
+        default: "600"
       scale:
         description: "Still scale"
         required: false
@@ -80,10 +84,16 @@ jobs:
           STILL_SCALE: ${{ github.event.inputs.scale }}
           STILL_TIMEOUT_MS: "300000"
           FRAME: ${{ github.event.inputs.frame }}
+          CONTROL: ${{ github.event.inputs.control }}
         run: |
           # One variant per pass. The first row is the control: if it does NOT show the
           # artifact, the bug is state that only exists in a sequence, and this whole
           # bisect is meaningless — check that before reading anything into the others.
+          #
+          # `aniso16` / `aniso1` / `nomip` are the FILTERING hypotheses. Every measurement so
+          # far says the artifact is confined to the terrace floor at a ~670:1 grazing UV
+          # ratio, is SHARPER and brighter on the bad frame, and leaves the wall in the same
+          # frame bit-identical. That is minification LOD selection, and these three switch it.
           variants=(
             'all|{}'
             'no-ink|{"post":{"ink":false}}'
@@ -92,12 +102,19 @@ jobs:
             'no-grade|{"post":{"grade":false}}'
             'no-post|{"post":{"ink":false,"lens":false,"bloom":false,"grade":false}}'
             'no-shadows|{"post":{"shadows":false}}'
+            'aniso16|{"post":{"aniso":16}}'
+            'aniso1|{"post":{"aniso":1}}'
+            'nomip|{"post":{"noMip":true}}'
           )
           for v in "${variants[@]}"; do
             name="${v%%|*}"; props="${v#*|}"
             echo "=== variant: $name  props: $props"
+            # render the probed frame AND the control at every variant, so each pair is a
+            # like-for-like comparison produced by one code path in one run
+            FRAMES="$FRAME"
+            [ -n "$CONTROL" ] && FRAMES="$CONTROL $FRAME"
             STILL_PROPS="$props" STILL_TAG="__$name" \
-              node tools/still.mjs "$FRAME" 2>&1 | tee "out/still_$name.txt" || {
+              node tools/still.mjs $FRAMES 2>&1 | tee "out/still_$name.txt" || {
                 echo "::error::variant $name failed to render"
                 continue
               }
@@ -106,59 +123,63 @@ jobs:
 
       - name: compare variants
         run: |
-          # The artifact is a set of horizontal cream bands across the terrace floor.
+          # The artifact is the terrace floor changing on ONE frame and then snapping back.
           #
-          # THE FIRST TWO METRICS WERE WRONG, both by using an ABSOLUTE threshold on a number
-          # that also moves with sharpness. The mean vertical gradient called frame 600's CLEAN
-          # no-lens / no-post variants "BANDING" (2.02 / 2.01 vs a 1.8 threshold). A max-row-jump
-          # metric did the same thing (601 no-lens 48.35 vs 601 all 13.26 — the lens merely
-          # smoothed it). Neither was measuring banding.
+          # Every earlier metric here was wrong for the same reason: an ABSOLUTE threshold on a
+          # number that also moves with sharpness. The mean vertical gradient called frame 600's
+          # CLEAN no-lens / no-post variants "BANDING" (2.02 / 2.01 vs a 1.8 threshold); a
+          # max-row-jump metric did the same (601 no-lens 48.35 vs 601 all 13.26 — the lens
+          # merely smoothed it).
           #
-          # What works is SELF-CALIBRATING: compare each frame's floor row-profile to the MEDIAN
-          # of its neighbours and divide by the neighbours' own spread. No absolute threshold, so
-          # resolution, codec, scale and lens softness all cancel. Measured on the real frames:
-          #   599 600 602 603 -> z = 0.76 -0.67 -0.13 0.00
-          #   601             -> z = 34.99
-          # That is a clean 35-sigma separation, and it is the number this step now reports.
+          # So the number reported now is a PAIR DIFFERENCE, not an absolute: for each variant,
+          # how much does the floor differ between the control frame and the probed frame,
+          # rendered by the same code path in the same run? A variant that fixes the artifact
+          # drives that delta toward the run-to-run noise; one that does not leaves it large.
+          # `hf` is the high-frequency energy (sharpness); the artifact is measurably SHARPER,
+          # so a fix must remove the hf jump as well as the mean jump.
           python3 - <<'PY' | tee out/variants.txt
           import glob, re, os, subprocess
           import numpy as np
-          files = sorted(glob.glob("out/stills/*.png"))
-          if not files:
-              print("no stills produced"); raise SystemExit(0)
-          def prof(p):
+          def load(p):
               raw = subprocess.run(["ffmpeg","-v","error","-i",p,"-f","rawvideo","-pix_fmt","rgb24","-"],
                                    capture_output=True).stdout
               info = subprocess.run(["ffprobe","-v","error","-show_entries","stream=width,height",
                                      "-of","csv=p=0",p], capture_output=True, text=True).stdout.strip()
               w, h = (int(x) for x in info.split(","))
-              F = np.frombuffer(raw, np.uint8).reshape(h, w, 3).astype(np.float32)
-              low = F[int(h * 0.55):].mean(axis=-1)
-              return low.mean(axis=1)
-          items = [(re.search(r"f_(\d+)", os.path.basename(p)).group(1),
-                    os.path.basename(p).replace(".png","").split("__")[-1], p) for p in files]
-          items.sort()
-          P = {p: prof(p) for _,_,p in items}
-          n = min(len(v) for v in P.values())
-          print(f"{'frame':>6} {'variant':<10} {'dev':>8} {'z':>7}")
-          for i,(f,v,p) in enumerate(items):
-              nb = [P[q][:n] for (f2,v2,q) in items if q != p]
-              med = np.median(np.stack(nb), axis=0)
-              dev = float(np.sqrt(((P[p][:n] - med)**2).mean()))
-              # z against the OTHER frames at this same variant, so a variant is judged
-              # only against its peers and not against the control
-              peers = [q for (f2,v2,q) in items if v2 == v and q != p]
-              if len(peers) >= 3:
-                  ds = []
-                  for q in peers:
-                      nb2 = [P[r][:n] for r in P if r != q]
-                      m2 = np.median(np.stack(nb2), axis=0)
-                      ds.append(float(np.sqrt(((P[q][:n] - m2)**2).mean())))
-                  med_d = float(np.median(ds)); mad = float(np.median(np.abs(np.array(ds)-med_d))) or 1e-6
-                  z = (dev - med_d)/(1.4826*mad)
-              else:
-                  z = float("nan")
-              print(f"{f:>6} {v:<10} {dev:8.3f} {z:7.2f}")
+              return np.frombuffer(raw, np.uint8).reshape(h, w, 3).astype(np.float32).mean(-1)
+          items = {}
+          for p in sorted(glob.glob("out/stills/*.png")):
+              b = os.path.basename(p).replace(".png","")
+              m = re.match(r"f_(\d+)(?:__(.*))?$", b)
+              if not m: continue
+              items.setdefault(m.group(2) or "all", {})[int(m.group(1))] = p
+          if not items:
+              print("no stills produced"); raise SystemExit(0)
+          def stats(g):
+              h = g.shape[0]
+              fl = g[int(h*0.62):int(h*0.95)]
+              hf = float(np.abs(np.diff(fl,axis=0)).mean()+np.abs(np.diff(fl,axis=1)).mean())
+              return float(fl.mean()), hf
+          print(f"{'variant':<10} {'frames':<12} {'d_mean':>8} {'d_hf':>8} {'hf_ratio':>9}  verdict")
+          rows = []
+          for v, d in sorted(items.items()):
+              if len(d) < 2: continue
+              fr = sorted(d)
+              a, b = d[fr[0]], d[fr[-1]]
+              (ma, ha), (mb, hb) = stats(load(a)), stats(load(b))
+              dm, dh = mb - ma, hb - ha
+              ratio = hb / ha if ha else float("nan")
+              rows.append((v, fr, dm, dh, ratio))
+          if not rows:
+              print("need two frames per variant (set the `control` input)"); raise SystemExit(0)
+          # the noise floor is the spread of d_mean across variants that share the SAME
+          # underlying frame content; use the smallest |d_mean| as the reference "no artifact"
+          base = min(abs(r[2]) for r in rows)
+          for v, fr, dm, dh, ratio in rows:
+              verdict = "FIXED" if abs(dm) <= max(base * 1.5, 1.0) else "still broken"
+              print(f"{v:<10} {str(fr):<12} {dm:8.2f} {dh:8.3f} {ratio:9.2f}  {verdict}")
+          print()
+          print(f"smallest |d_mean| across variants = {base:.2f} (the run's own noise floor)")
           PY
 
       - name: "UV density — every big flat quad must tile its texture"
