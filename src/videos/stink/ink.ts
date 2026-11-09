@@ -407,10 +407,18 @@ export class InkPass extends Pass {
 
     // 2b) test only (term 4): read the packed depth back out of the mask target and log it.
     if (this.term === 4 && this.probe) {
-      const p = this.probe, th = this.maskRT.height;
-      const w = Math.max(1, Math.round(p.x1 - p.x0)), h = Math.max(1, Math.round(p.row1 - p.row0));
+      const p = this.probe, th = this.maskRT.height, tw = this.maskRT.width;
+      // Rows may be given as fractions of the target height (0..1). The mask target is the
+      // CANVAS size, not the still's output size, and at STILL_SCALE 0.6 those differ by
+      // 1.667x -- a rectangle given in still rows lands on sky. Fractions make the probe
+      // independent of the scale it is run at.
+      const fy = (v: number) => (v <= 1 ? v * th : v);
+      const fx = (v: number) => (v <= 1 ? v * tw : v);
+      const rx0 = Math.max(0, Math.round(fx(p.x0))), rx1 = Math.min(tw, Math.round(fx(p.x1)));
+      const r0 = Math.max(0, Math.round(fy(p.row0))), r1 = Math.min(th, Math.round(fy(p.row1)));
+      const w = Math.max(1, rx1 - rx0), h = Math.max(1, r1 - r0);
       const buf = new Uint8Array(w * h * 4);
-      renderer.readRenderTargetPixels(this.maskRT, Math.round(p.x0), Math.max(0, th - p.row1), w, h, buf);
+      renderer.readRenderTargetPixels(this.maskRT, rx0, Math.max(0, th - r1), w, h, buf);
       const out: string[] = [];
       const step = Math.max(1, Math.floor(w / 10));
       for (let r = h - 1; r >= 0; r--) {           // buffer is bottom-up; report top-down
@@ -420,11 +428,11 @@ export class InkPass extends Pass {
           const v = ((buf[i + 1] / 255) + (buf[i] / 255) / 255) * 8.0;
           vals.push(v.toFixed(5));
         }
-        out.push(`  row ${p.row1 - 1 - r}: ${vals.join(" ")}`);
+        out.push(`  row ${r0 + (h - 1 - r)}: ${vals.join(" ")}`);
       }
       // console.warn, not log: tools/still.mjs runs Remotion at logLevel "warn", so a plain
       // console.log from the page is dropped before it reaches the CI log.
-      console.warn(`INKPROBE ${JSON.stringify({ tw: this.maskRT.width, th, w, h, x0: p.x0, row0: p.row0, row1: p.row1, depth: out })}`);
+      console.warn(`INKPROBE ${JSON.stringify({ tw, th, w, h, row0: r0, row1: r1, depth: out })}`);
     }
 
     // 3) composite into a temp target, 4) copy back into the input buffer (colour only; depth untouched)
