@@ -25,16 +25,43 @@ The QA metric is a whole-frame mean abs diff, so a camera shake over a grazing p
 So the gate has exactly **one real defect** (frame 601) and two false positives caused by the
 planned impact kicks not being declared to it.
 
+## Frame 601: ROOT CAUSE FOUND — `face()` transposed its UV spans
+Not a render glitch, not the post chain, not the shadow map, not the cast, not the camera.
+
+Measured on the delivered film (596-606): the **wall is bit-identical** between 600 and 601
+(zero-shift NCC +0.997) while the **near floor** is uncorrelated (-0.26) and becomes measurably
+SHARPER (hf 0.85 -> 1.22) and BRIGHTER (188 -> 199), then snaps back on 602. Exactly one frame
+out of the 147 in shot 6.
+
+Cause: `quad()` binds `u` to the a->b edge and `v` to the a->d edge. `face()` reverses the winding
+to `quad(a, d, c, b, ...)` when the normal points away, which swaps which world edge carries each
+axis -- but it passed the caller's `u1, v1` through unchanged. The spans were computed for a->b /
+a->d, so on every flipped face they were transposed:
+
+| face | before | after |
+|---|---|---|
+| terrace floor | u 0.267 m/uv, v 60 m/uv -> **225:1** | 4.000 / 4.000 |
+| farbank wall | u 0.062 m/uv, v 260 m/uv -> **4225:1** | 4.000 / 4.000 |
+| embankment wall | already 1:1 (not flipped) | unchanged |
+| farbank floor | already 1:1 (not flipped) | unchanged |
+
+A ~225:1 minification stretch is what put the sampler in the regime where one frame resolved to a
+different mip and snapped back. The wall was untouched because its face is not flipped.
+
+Confirmed by raycast: at the artefact rows the floor's `uv.y` is exactly **1.50000** on every row
+of every frame -- `(0-(-90))/510*8.5` -- while `u` tracks the camera. The earlier "UV fix" claimed
+1:1 but was checked with a raycast that cannot see an axis swap.
+
+**Fixed** (commit `942e69c`): the flipped branch now passes `(v1, u1)`.
+
 ## Open work
-1. Decide frame 601: fix and re-render chunk 5, or accept.
-   Test in flight: `stills.yml` run 42545166833 renders frames 599-603 at scale 0.6 — if 601 is
-   clean as an isolated still, the artifact needs in-sequence context (concurrency 1 in the chunk
-   render), and only a range re-render can reproduce it.
-2. Teach `shots.json` about the kicks so the gate stops calling designed shakes glitches
-   (`KICKS` in story.ts is currently NOT exported; `emit-shots.mjs` would need it).
-3. Re-run the gate to a genuine PASS.
+1. ~~Decide frame 601~~ — fixed; needs a full re-render (every shot sees the terrace floor).
+2. ~~Teach `shots.json` about the kicks~~ — done in `ce54c39`, which postdates the delivered
+   render, so 1454/1455/1840 will not recur.
+3. Re-render all 16 chunks and re-run the gate to a genuine PASS.
 4. **Download the `final` artifact BEFORE deleting the repo** — deleting the repo destroys every
-   Actions artifact, including the only copy of `out/video.mp4`.
+   Actions artifact, including the only copy of `out/video.mp4`. Already saved to
+   `~/qa-scratch/final/`.
 5. Delete the public repo `antiviruslol518-cpu/stink-ci` when finished (standing instruction).
 
 ## Constraints
