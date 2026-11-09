@@ -82,6 +82,12 @@ the terrace floor, embankment wall, and both far-bank faces. Verified the result
 exactly affine over the whole face (max residual 1e-14) at 4.000 m/uv on both axes, and the
 longest triangle edge drops from ~500 m to 32 m.
 
+Two checks that the fix cannot change how anything *looks*:
+- sampled the new grid against the previous `face()` output at 11 world points across the
+  floor: identical to 7e-15 (including both flipped and unflipped cases);
+- the whole set is still only 18.6 k vertices and Batch merges one mesh per material, so the
+  draw-call count is unchanged.
+
 ## Open work
 1. ~~Decide frame 601~~ — fixed; needs a full re-render (every shot sees the terrace floor).
 2. ~~Teach `shots.json` about the kicks~~ — done in `ce54c39`, which postdates the delivered
