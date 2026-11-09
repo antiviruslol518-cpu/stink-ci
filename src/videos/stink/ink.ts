@@ -143,6 +143,16 @@ float crease(vec3 n0, vec3 P0, float zc, vec2 uq, float zq) {
 
 void main() {
   vec4 nc = textureLod(tNormal, vUv, 0.0);
+  // dbgTerm 7: RAW depth and coverage, with the coverage gate below bypassed. The depth term
+  // fires on frame 601 rows 1876..1881 because a neighbour reads far too near (zc jumps from
+  // 4.23 to 4.35 m across row 1882, and row 1882 itself is empty). Before blaming the ink test,
+  // find out whether those pixels hold a SURFACE (alpha 1, some normal) or are a rasteriser
+  // crack (alpha 0 / no geometry). Packed: R/G = 16-bit depth over 0..8 m, B = alpha * 255.
+  if (dbgTerm > 6.5) {
+    float v = clamp(dist(tDepth, vUv) / 8.0, 0.0, 1.0) * 255.0;
+    float hi = floor(v);
+    gl_FragColor = vec4(v - hi, hi / 255.0, nc.a, 1.0); return;
+  }
   if (nc.a < 0.5) { gl_FragColor = vec4(0.0); return; }          // sky / empty: ink lives on the near object only
   float zc = dist(tDepth, vUv);
 
@@ -438,15 +448,19 @@ export class InkPass extends Pass {
         const vals: string[] = [];
         for (let c = 0; c < w; c += step) {
           const i = (r * w + c) * 4;
-          // term 4: depth over 0..8 m; term 5: -s over 0..0.05 (plus offset over 0..0.2 in B)
-          const span = this.term === 4 ? 8.0 : 0.05;
+          // term 4 / 7: depth over 0..8 m; term 5: -s over 0..0.05 (plus offset over 0..0.2 in B)
+          const span = this.term === 5 ? 0.05 : 8.0;
           // Unpack: G holds hi/255, R holds the fraction, so the value is (hi + frac)/255 * span.
           // (An earlier version wrote (G/255) + (R/255)/255; that is the SAME number, since
           // G = hi/255 and R = frac*255 -- it is not a bug. Precision is 123 um per step at 8 m,
           // set by R's 256 fraction levels, not by this expression.)
           const v = ((buf[i + 1] + buf[i] / 255) / 255) * span;
           const off = this.term === 5 ? buf[i + 2] / 255 * 0.2 : 0;
-          vals.push(this.term === 5 ? `${v.toPrecision(4)}/${off.toPrecision(3)}` : v.toPrecision(6));
+          // term 7 also carries coverage in B, so a rasteriser crack (no surface) is visible.
+          const a = this.term === 7 ? buf[i + 2] / 255 : 1;
+          vals.push(this.term === 5 ? `${v.toPrecision(4)}/${off.toPrecision(3)}`
+            : this.term === 7 ? `${v.toPrecision(5)}/a${a.toFixed(2)}`
+            : v.toPrecision(6));
         }
         out.push(`  row ${r0 + (h - 1 - r)}: ${vals.join(" ")}`);
       }
