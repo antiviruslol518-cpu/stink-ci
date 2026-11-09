@@ -282,8 +282,13 @@ export function farBank(b: Batch, M: Record<string, THREE.Material>) {
  */
 export function sewer(b: Batch, M: Record<string, THREE.Material>) {
   const Y = -14, R = 5.2, LEN = 70;
-  // floor, facing up
-  b.add(face(V(-LEN / 2, Y, -R), V(LEN / 2, Y, -R), V(LEN / 2, Y, R), V(-LEN / 2, Y, R), UP), M.brick);
+  // floor, facing up. Split along x (the 70 m axis): shot 10 looks down this floor from 2.6 m
+  // above it at a grazing angle, which is the same regime that made the terrace floor's
+  // 500 m triangles interpolate badly on frame 601. 14 strips -> 5 m x 10.4 m, longest edge
+  // 11.5 m. uv spans stay 0..1 over the whole face, exactly as face()'s defaults had them, so
+  // the brick scale is unchanged -- only the triangulation differs. No z-boundary is
+  // introduced, so nothing here can ink the way z = 34.25 did.
+  for (const g of faceGrid(V(-LEN / 2, Y, -R), V(LEN / 2, Y, -R), V(LEN / 2, Y, R), V(-LEN / 2, Y, R), UP, 1, 1, 14, 1)) b.add(g, M.brick);
   // walls + arched ceiling: 10 segments, each a strip running the length of the tunnel
   const N = 10;
   for (let i = 0; i < N; i++) {
