@@ -67,7 +67,10 @@ export class World {
   private frustum = new THREE.Frustum();
   private m4 = new THREE.Matrix4(); private v = new THREE.Vector3(); private sph = new THREE.Sphere();
 
-  constructor(kit: Kit) {
+  /** `shadows: false` is a test-still switch only (Bridge's `post.shadows`). It is the one flag that
+   *  separates shadow-map acne from a texture/mip problem on a grazing ground plane: acne vanishes
+   *  when the sun stops casting, a texture defect does not. */
+  constructor(kit: Kit, opts?: { shadows?: boolean }) {
     const R = this.root, M: Mats = {};
     // ---- sky + light ----
     // sky: 5 colour stops by elevation (textures.md 5.2 #5 + depth.md 2/6.5), written as tone-map-inverted linear values
@@ -94,7 +97,7 @@ export class World {
     for (const m of [this.sunDisc, this.sunHalo]) { m.frustumCulled = false; m.layers.set(NOINK); R.add(m); }
     this.hemi = new THREE.HemisphereLight("#cfe6ff", "#6c5c8c", 1.1);
     this.sun = new THREE.DirectionalLight("#fff0d6", 2.6);
-    this.sun.castShadow = true;
+    this.sun.castShadow = opts?.shadows !== false;
     this.sun.shadow.mapSize.set(4096, 4096);
     this.fill = new THREE.DirectionalLight("#9fb8ff", 0.35);
     R.add(this.hemi, this.sun, this.sun.target, this.fill, this.fill.target);

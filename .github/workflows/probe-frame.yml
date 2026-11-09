@@ -91,6 +91,7 @@ jobs:
             'no-bloom|{"post":{"bloom":false}}'
             'no-grade|{"post":{"grade":false}}'
             'no-post|{"post":{"ink":false,"lens":false,"bloom":false,"grade":false}}'
+            'no-shadows|{"post":{"shadows":false}}'
           )
           for v in "${variants[@]}"; do
             name="${v%%|*}"; props="${v#*|}"
