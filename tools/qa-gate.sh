@@ -65,10 +65,14 @@ fi
 # ----------------------------------------------------------------- 404 ----
 hdr "RENDER LOG (missing props)"
 if [ -n "$LOG" ] && [ -f "$LOG" ]; then
-  N404=$(grep -ciE "404|failed to load resource|cannot stat.*\.glb" "$LOG" || true)
+  # Do NOT grep for a bare "404". The renderer prints a progress line per frame —
+  # "frame 404/471  96.1 s/frame" — so a frame index containing 404 matches, and a
+  # perfectly clean render FAILS the gate on a false positive. Require the HTTP context
+  # that an actual missing asset produces.
+  N404=$(grep -ciE "GET [^ ]* 404|404 (Not Found|\(Not Found\))|failed to load resource|cannot stat.*\.glb" "$LOG" || true)
   if [ "${N404:-0}" -gt 0 ]; then
     say_fail "$N404 asset-load failure lines — props are MISSING from the render (this exact defect shipped an empty set). Copy assets/kenney into public/bridge/kenney and re-render"
-    grep -iE "404|failed to load resource" "$LOG" | head -5 | sed 's/^/       /'
+    grep -iE "GET [^ ]* 404|404 (Not Found|\(Not Found\))|failed to load resource" "$LOG" | head -5 | sed 's/^/       /'
   else
     say_pass "no asset 404s in the render log"
   fi
