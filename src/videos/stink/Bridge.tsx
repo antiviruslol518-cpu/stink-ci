@@ -25,8 +25,8 @@ export const BRIDGE_FRAMES = TOTAL;
 /** A/B switches for test stills only (Remotion inputProps `{ post: { ink: false, ... } }`); everything is on by default.
  *  `shadows` is here because the frame-601 banding is the signature of shadow-map acne on a grazing ground
  *  plane: turning the sun's shadow off is the one test that separates acne from a texture/mip problem. */
-type PostToggles = { ink: boolean; lens: boolean; pre: boolean; bloom: boolean; grade: boolean; grain: boolean; shadows: boolean; cast: boolean; world: boolean; aniso: number; noMip: boolean };
-const toggles = (): PostToggles => ({ ink: true, lens: true, pre: true, bloom: true, grade: true, grain: false, shadows: true, cast: true, world: true, aniso: 0, noMip: false, ...((getInputProps() as { post?: Partial<PostToggles> }).post ?? {}) });
+type PostToggles = { ink: boolean; lens: boolean; pre: boolean; bloom: boolean; grade: boolean; grain: boolean; shadows: boolean; cast: boolean; world: boolean; aniso: number; noMip: boolean; inkDebug: number };
+const toggles = (): PostToggles => ({ ink: true, lens: true, pre: true, bloom: true, grade: true, grain: false, shadows: true, cast: true, world: true, aniso: 0, noMip: false, inkDebug: 0, ...((getInputProps() as { post?: Partial<PostToggles> }).post ?? {}) });
 
 /** Bloom for emissive sources only (depth.md 6.4). Its MIP chain always starts at 540x960 (half of 1080x1920),
  *  whatever the output size, so the glow keeps the same size relative to the frame (e-fold ~30 px at 1080p,
@@ -55,7 +55,7 @@ const Inner: React.FC<{ id: number; kit: Kit }> = ({ id, kit }) => {
   const world = useMemo(() => new World(kit, { shadows: on.shadows, cast: on.cast, aniso: on.aniso || undefined, noMip: on.noMip }), [kit, on]);
   const target = useMemo(() => new THREE.Vector3(), []);
   const fx = useMemo(() => ({
-    ink: new InkPass(scene, camera as THREE.PerspectiveCamera),
+    ink: Object.assign(new InkPass(scene, camera as THREE.PerspectiveCamera), { debug: (getInputProps() as { post?: { inkDebug?: number } }).post?.inkDebug ?? 0 }),
     lens: new LensBlur({ maxCoC: 24, nearScale: 1.2 }),
     bloom: makeBloom(),
     tone: new ToneMappingEffect({ mode: ToneMappingMode.NEUTRAL }),
