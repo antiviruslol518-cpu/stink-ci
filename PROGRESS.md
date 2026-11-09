@@ -54,6 +54,34 @@ of every frame -- `(0-(-90))/510*8.5` -- while `u` tracks the camera. The earlie
 
 **Fixed** (commit `942e69c`): the flipped branch now passes `(v1, u1)`.
 
+## Frame 601, part 2: the seam follows the floor's TRIANGLE DIAGONAL
+The UV fix corrected the floor's density but did **not** remove the artifact. Bisecting the
+post chain on the fixed geometry showed the characters' skirts clipped at the same row in
+**every** variant — `all`, `no-ink`, `no-lens`, `no-bloom`, `no-grade`, `no-post`,
+`no-shadows`, `aniso1`, `aniso16`, `nomip`. So it is not the post chain.
+
+What it actually is: frame 601 draws a hard line at row ~925 that tracks the **triangle
+diagonal of the terrace floor quad**:
+
+| screen x | diagonal (projected) | observed line |
+|---|---|---|
+| 120 | 924.8 | 924 |
+| 320 | 930.0 | 929 |
+| 560 | 936.3 | 935 |
+
+Slope 0.0271 (observed) vs 0.0260 (diagonal), constant ~1 px offset across the full width.
+Everything on the near side of that diagonal is drawn at a different texture LOD from
+everything beyond it — vertical HF above/below the diagonal is 8.4/9.9 on frame 600 but
+9.8/4.5 on 601 (2.16x). The terrace floor was ONE 510 m x 34 m quad, i.e. **two triangles**
+with vertices far outside the frustum, so every per-vertex value is interpolated across a
+500 m span. It is a per-triangle interpolation defect, which is why sub-pixel motion flips it
+on exactly one frame of a 147-frame shot.
+
+**Fixed** (commit `5293261`): `faceGrid()` subdivides a face into an nu x nv grid; applied to
+the terrace floor, embankment wall, and both far-bank faces. Verified the resulting uv map is
+exactly affine over the whole face (max residual 1e-14) at 4.000 m/uv on both axes, and the
+longest triangle edge drops from ~500 m to 32 m.
+
 ## Open work
 1. ~~Decide frame 601~~ — fixed; needs a full re-render (every shot sees the terrace floor).
 2. ~~Teach `shots.json` about the kicks~~ — done in `ce54c39`, which postdates the delivered
