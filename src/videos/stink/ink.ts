@@ -211,7 +211,11 @@ void main() {
   // that would be needed to drive the depth-jump term to its measured strength. The CPU reads
   // this back and recomputes s exactly as the loop below does, so the numbers are the shader's
   // own, not an analytic prediction. Sky / character-covered pixels are 0 (zc is the far plane).
-  if (dbgTerm > 3.5) {
+  // GUARD ON BOTH SIDES. This used to read "dbgTerm > 3.5" with the term 5/6 block below it,
+  // so 5 and 6 were swallowed here and every probe of them returned the term-4 depth ramp
+  // (both reported the identical max/min -- that was the tell). Each debug term needs a closed
+  // interval or a later term is dead code.
+  if (dbgTerm > 3.5 && dbgTerm < 4.5) {
     float v = clamp(zc / 8.0, 0.0, 1.0) * 255.0;   // 0..255
     float hi = floor(v);                           // high byte, integer
     gl_FragColor = vec4(v - hi, hi / 255.0, 0.0, 1.0); return;  // R = fraction, G = high/255
@@ -436,8 +440,11 @@ export class InkPass extends Pass {
           const i = (r * w + c) * 4;
           // term 4: depth over 0..8 m; term 5: -s over 0..0.05; term 6: plane offset over 0..0.2 m
           const span = this.term === 4 ? 8.0 : this.term === 5 ? 0.05 : 0.2;
-          const v = ((buf[i + 1] / 255) + (buf[i] / 255) / 255) * span;
-          vals.push(v.toPrecision(4));
+          // Unpack: G holds hi/255, R holds the fraction. (hi + frac)/255 * span. The earlier
+          // `(G/255) + (R/255)/255` divided the fraction by 255 twice, so the value was 8-bit
+          // only -- 31 mm of depth per code step, which cannot see a 23 mm step at all.
+          const v = ((buf[i + 1] + buf[i] / 255) / 255) * span;
+          vals.push(v.toPrecision(6));
         }
         out.push(`  row ${r0 + (h - 1 - r)}: ${vals.join(" ")}`);
       }
