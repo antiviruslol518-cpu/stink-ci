@@ -163,6 +163,10 @@ void main() {
   vec3 n0 = nc.xyz;
   vec3 P0 = viewPos(vUv, zc);
   float eD = 0.0, eN = 0.0;
+  // depth probe (dbgTerm 3): the strongest depth-jump signal found anywhere in this pixel's
+  // search, and the plane offset that went with it. Read back from the CPU so the numbers are
+  // exact instead of inferred from a PNG.
+  float dbgS = 0.0, dbgOff = 0.0;
   for (int a = 0; a < 4; a++) {
     for (int r = 1; r <= RMAX; r++) {
       vec2 o = STEP[a] * texel * float(r);
@@ -187,6 +191,7 @@ void main() {
       // exists to remove is a sub-millimetre interpolation mismatch, so 6 cm is already ~100x
       // the thing being suppressed while staying well under any real object.
       float off = max(abs(dot(viewPos(vUv - o, z1) - P0, n0)), abs(dot(viewPos(vUv + o, z2) - P0, n0)));
+      if (-s > dbgS) { dbgS = -s; dbgOff = off; }
       eD = max(eD, smoothstep(depthLo, depthHi, -s) * cw * smoothstep(min(0.004 * zc, 0.015), min(0.02 * zc, 0.06), off));
       // crease: normal turns towards a neighbour at the same depth
       if (ch > 0.0) eN = max(eN, max(crease(n0, P0, zc, vUv - o, z1), crease(n0, P0, zc, vUv + o, z2)) * ch);
@@ -197,6 +202,20 @@ void main() {
   float ink = eCombined * strength * mix(1.0, farOpacity, t) * (1.0 - smoothstep(fadeNear, fadeFar, zc));
   float f0 = max(fogRange.x, fogStart);
   float fogK = fogRange.y > f0 ? clamp((zc - f0) / (fogRange.y - f0), 0.0, 1.0) : 0.0;
+  // dbgTerm 3: red = the strongest -s seen (x50, so 0.01 -> 0.5), green = plane offset in cm
+  // (x1, so 6 cm -> full), blue = -s again scaled x2000 (fine detail). Read back numerically.
+  if (dbgTerm > 2.5 && dbgTerm < 3.5) { gl_FragColor = vec4(clamp(dbgS * 50.0, 0.0, 1.0), clamp(dbgOff * 100.0, 0.0, 1.0), clamp(dbgS * 2000.0, 0.0, 1.0), 1.0); return; }
+  // dbgTerm 4: the depth buffer itself, 16-bit packed into R (fraction) and G (high byte), over
+  // 0..8 m. The mask target is 8-bit, so one channel cannot hold 4.6 m at the precision that
+  // matters. Packing gives 8/65025 = 123 um, which is 450x finer than the ~5.5 cm depth error
+  // that would be needed to drive the depth-jump term to its measured strength. The CPU reads
+  // this back and recomputes s exactly as the loop below does, so the numbers are the shader's
+  // own, not an analytic prediction. Sky / character-covered pixels are 0 (zc is the far plane).
+  if (dbgTerm > 3.5) {
+    float v = clamp(zc / 8.0, 0.0, 1.0) * 255.0;   // 0..255
+    float hi = floor(v);                           // high byte, integer
+    gl_FragColor = vec4(v - hi, hi / 255.0, 0.0, 1.0); return;  // R = fraction, G = high/255
+  }
   gl_FragColor = vec4(ink, fogK, 0.0, 1.0);
 }`;
 
@@ -218,6 +237,8 @@ void main() {
   vec4 c = texture2D(inputBuffer, vUv);
   if (debug == 1) { gl_FragColor = vec4(vec3(1.0 - a), 1.0); return; }               // mask only
   if (debug == 2) { gl_FragColor = vec4(texture2D(tNormal, vUv).xyz * 0.5 + 0.5, 1.0); return; } // world normals
+  // raw mask RGB, unfiltered -- carries whatever the mask shader wrote, incl. dbgTerm 3's probe
+  if (debug == 3) { gl_FragColor = vec4(texture2D(tMask, vUv).rgb, 1.0); return; }
   // blend in display (gamma) space like Canvas2D does for the character drawings: coverage -> darkness is linear
   // on screen, so the measured line widths equal the coverage widths (a linear-light blend reads ~30 % thinner)
   float fk = texture2D(tMask, vUv).g;                       // fog amount of the line (max over the AA footprint)
@@ -241,6 +262,11 @@ export class InkPass extends Pass {
   debug = 0;
   /** test only: 0 = both edge terms, 1 = depth-jump only, 2 = crease only */
   term = 0;
+  /** test only, with term 4: read this mask-target rect back and log the packed depth.
+   *  Rows are counted from the TOP (the convention every measurement here uses); the readback
+   *  flips to GL's bottom-up y. The mask target is RGBA8, so a PNG round-trip would work too,
+   *  but the readback keeps the numbers in the CI log next to the run that produced them. */
+  probe: { x0: number; x1: number; row0: number; row1: number } | null = null;
   private world: THREE.Scene;
   private cam: THREE.PerspectiveCamera;
   private rt: THREE.WebGLRenderTarget;
@@ -367,6 +393,11 @@ export class InkPass extends Pass {
     // 2) edge mask
     const u = this.maskMat.uniforms, e = cam.projectionMatrix.elements;
     u.cNear.value = cam.near; u.cFar.value = cam.far; u.p00.value = e[0]; u.p11.value = e[5];
+    // NOTE: dbgTerm is set here, before the mask pass runs. It used to be set in step 3, i.e.
+    // AFTER the mask had already rendered, so the first render of any page used 0. Harmless
+    // while `term` is constant (every later render picks it up), but it silently corrupts any
+    // future per-frame use -- set it before the pass that reads it.
+    u.dbgTerm.value = this.term;
     const fog = scene.fog as THREE.Fog | null;
     if (fog && (fog as THREE.Fog).isFog) { (u.fogRange.value as THREE.Vector2).set(fog.near, fog.far); (this.compMat.uniforms.fogColor.value as THREE.Color).copy(fog.color); }
     else (u.fogRange.value as THREE.Vector2).set(0, 0);
@@ -374,10 +405,31 @@ export class InkPass extends Pass {
     renderer.setRenderTarget(this.maskRT);
     renderer.render(this.fsScene, this.fsCam);
 
+    // 2b) test only (term 4): read the packed depth back out of the mask target and log it.
+    if (this.term === 4 && this.probe) {
+      const p = this.probe, th = this.maskRT.height;
+      const w = Math.max(1, Math.round(p.x1 - p.x0)), h = Math.max(1, Math.round(p.row1 - p.row0));
+      const buf = new Uint8Array(w * h * 4);
+      renderer.readRenderTargetPixels(this.maskRT, Math.round(p.x0), Math.max(0, th - p.row1), w, h, buf);
+      const out: string[] = [];
+      const step = Math.max(1, Math.floor(w / 10));
+      for (let r = h - 1; r >= 0; r--) {           // buffer is bottom-up; report top-down
+        const vals: string[] = [];
+        for (let c = 0; c < w; c += step) {
+          const i = (r * w + c) * 4;
+          const v = ((buf[i + 1] / 255) + (buf[i] / 255) / 255) * 8.0;
+          vals.push(v.toFixed(5));
+        }
+        out.push(`  row ${p.row1 - 1 - r}: ${vals.join(" ")}`);
+      }
+      // console.warn, not log: tools/still.mjs runs Remotion at logLevel "warn", so a plain
+      // console.log from the page is dropped before it reaches the CI log.
+      console.warn(`INKPROBE term4 ${w}x${h} x[${p.x0},${p.x1}) rows[${p.row0},${p.row1}) depth(m):\n${out.join("\n")}`);
+    }
+
     // 3) composite into a temp target, 4) copy back into the input buffer (colour only; depth untouched)
     this.compMat.uniforms.inputBuffer.value = inputBuffer.texture;
     this.compMat.uniforms.debug.value = this.debug;
-    this.maskMat.uniforms.dbgTerm.value = this.term;
     this.quad.material = this.compMat;
     renderer.setRenderTarget(this.tmpRT);
     renderer.render(this.fsScene, this.fsCam);

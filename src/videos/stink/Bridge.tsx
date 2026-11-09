@@ -60,6 +60,9 @@ const Inner: React.FC<{ id: number; kit: Kit }> = ({ id, kit }) => {
       const cfg = (getInputProps() as { post?: { inkDebug?: number; inkTerm?: number } }).post;
       p.debug = cfg?.inkDebug ?? 0;
       p.term = cfg?.inkTerm ?? 0;
+      // inkProbe: [x0, row0, x1, row1] in mask-target pixels, rows from the TOP.
+      const pr = (cfg as { inkProbe?: number[] } | undefined)?.inkProbe;
+      if (pr?.length === 4) p.probe = { x0: pr[0], row0: pr[1], x1: pr[2], row1: pr[3] };
       return p;
     })(),
     lens: new LensBlur({ maxCoC: 24, nearScale: 1.2 }),

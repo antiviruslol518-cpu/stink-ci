@@ -28,6 +28,10 @@ on:
         description: "Still scale"
         required: false
         default: "0.6"
+      variants:
+        description: "Semicolon-separated name|props list. Empty = the full post-chain bisect."
+        required: false
+        default: ""
 
 jobs:
   probe:
@@ -85,6 +89,7 @@ jobs:
           STILL_TIMEOUT_MS: "300000"
           FRAME: ${{ github.event.inputs.frame }}
           CONTROL: ${{ github.event.inputs.control }}
+          VARIANTS: ${{ github.event.inputs.variants }}
         run: |
           # One variant per pass. The first row is the control: if it does NOT show the
           # artifact, the bug is state that only exists in a sequence, and this whole
@@ -108,6 +113,11 @@ jobs:
             'no-cast|{"post":{"cast":false}}'
             'no-world|{"post":{"world":false}}'
           )
+          # A caller can replace the whole list, e.g. to run one depth probe instead of twelve
+          # variants. Semicolon-separated so the JSON inside each entry needs no escaping.
+          if [ -n "$VARIANTS" ]; then
+            IFS=';' read -r -a variants <<< "$VARIANTS"
+          fi
           for v in "${variants[@]}"; do
             name="${v%%|*}"; props="${v#*|}"
             echo "=== variant: $name  props: $props"
