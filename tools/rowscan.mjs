@@ -5,6 +5,19 @@
 // and world point, so a depth STEP in the geometry can be told from a constant-depth triangulation
 // boundary. Pure geometry: no WebGL, no browser.
 //
+// LIMITATION — READ BEFORE TRUSTING A RESULT FROM THIS TOOL.
+// The `Batch` below is a REDUCED COPY of the one in build.ts, not the same code. The real
+// Batch.add() also copies each geometry's normals (computeVertexNormals() when absent) and
+// applies the caller's matrix `m`; this one copies POSITIONS ONLY. Two consequences:
+//   * every raycast answer describes parliament.ts's raw vertex positions, which is what you
+//     want for "does the floor have a geometric step at this row" — that question is unaffected;
+//   * it is NOT a model of what the renderer draws. Anything that depends on normals, winding
+//     or a per-instance matrix (shading, backface culling, the cast, the water shader) is
+//     simply absent here. Do not use this tool to explain a pixel colour or a lighting change.
+// It also omits flotsam(), the actors and the fx, and models the river as a flat quad.
+// A depth disagreement between this tool and InkPass's readback is therefore evidence about
+// the GEOMETRY; it is never by itself evidence about the render.
+//
 // Usage: node tools/rowscan.mjs [--shot 6] [--frame 601] [--rows 1115:1145] [--w 648] [--h 1152]
 //                                [--x 324] [--x 60] [--x 588]
 import * as THREE from "three";
