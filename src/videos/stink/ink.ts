@@ -440,9 +440,10 @@ export class InkPass extends Pass {
           const i = (r * w + c) * 4;
           // term 4: depth over 0..8 m; term 5: -s over 0..0.05 (plus offset over 0..0.2 in B)
           const span = this.term === 4 ? 8.0 : 0.05;
-          // Unpack: G holds hi/255, R holds the fraction. (hi + frac)/255 * span. The earlier
-          // `(G/255) + (R/255)/255` divided the fraction by 255 twice, so the value was 8-bit
-          // only -- 31 mm of depth per code step, which cannot see a 23 mm step at all.
+          // Unpack: G holds hi/255, R holds the fraction, so the value is (hi + frac)/255 * span.
+          // (An earlier version wrote (G/255) + (R/255)/255; that is the SAME number, since
+          // G = hi/255 and R = frac*255 -- it is not a bug. Precision is 123 um per step at 8 m,
+          // set by R's 256 fraction levels, not by this expression.)
           const v = ((buf[i + 1] + buf[i] / 255) / 255) * span;
           const off = this.term === 5 ? buf[i + 2] / 255 * 0.2 : 0;
           vals.push(this.term === 5 ? `${v.toPrecision(4)}/${off.toPrecision(3)}` : v.toPrecision(6));
