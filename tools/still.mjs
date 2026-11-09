@@ -9,7 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveChromeOrExit, chromiumOptions } from "./chrome.mjs";
 
-const frames = process.argv.slice(2).map(Number).filter((n) => Number.isFinite(n));
+// Accept commas as well as spaces. The workflow's `frames` input is filled in by hand and
+// "599,600,601" is the natural way to type it; a bare argv split turns that into one NaN,
+// the filter drops it, and the script exits "successfully" having rendered nothing.
+const frames = process.argv.slice(2).join(" ").split(/[\s,]+/)
+  .filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
 if (!frames.length) {
   console.error("usage: still.mjs <frame> [more...]");
   process.exit(1);

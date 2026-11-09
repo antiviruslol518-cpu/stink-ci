@@ -92,7 +92,13 @@ jobs:
             ')
           fi
           echo "frames: $FR"
+          # `| tee` throws away the exit code — a stills run that rendered NOTHING (bad frame
+          # list, chrome died) still went green and uploaded an artifact with no PNGs.
           node tools/still.mjs $FR 2>&1 | tee out/stills.txt
+          RC=${PIPESTATUS[0]}
+          echo "still exit: $RC"
+          ls -la out/stills/*.png || { echo "::error::no stills were produced"; exit 1; }
+          exit $RC
 
       - name: contact sheet
         run: |
