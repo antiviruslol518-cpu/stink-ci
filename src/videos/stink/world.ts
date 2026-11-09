@@ -76,7 +76,7 @@ export class World {
    *  floor drawing OVER the Members' lower halves while their heads stay identical, so the question is
    *  whether the depth/occlusion flip needs the cast at all: with no characters and no contact blobs the
    *  floor is the only thing in the lower frame, and the frame either changes or it does not. */
-  constructor(kit: Kit, opts?: { shadows?: boolean; cast?: boolean; aniso?: number; noMip?: boolean }) {
+  constructor(kit: Kit, opts?: { shadows?: boolean; cast?: boolean; aniso?: number; noMip?: boolean; floorNv?: number }) {
     const R = this.root, M: Mats = {};
     // ---- sky + light ----
     // sky: 5 colour stops by elevation (textures.md 5.2 #5 + depth.md 2/6.5), written as tone-map-inverted linear values
@@ -157,7 +157,7 @@ export class World {
       };
       for (const k of Object.keys(PM)) fix(PM[k]);
     }
-    terrace(b, PM);
+    terrace(b, PM, { nv: opts?.floorNv });
     palace(b, PM, PARLIAMENT.PALACE_Z, { lit: 1, lime: false });
     farBank(b, PM);
     sewer(b, PM);

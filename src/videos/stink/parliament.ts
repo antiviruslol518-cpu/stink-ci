@@ -177,7 +177,7 @@ export function palace(b: Batch, M: Record<string, THREE.Material>, zc: number, 
  * The terrace floor runs from the quay edge back under the palace. Its depth (TERRACE_DEPTH)
  * is what gives the terrace cameras room to stand back and the crowd somewhere to be.
  */
-export function terrace(b: Batch, M: Record<string, THREE.Material>) {
+export function terrace(b: Batch, M: Record<string, THREE.Material>, opts?: { nv?: number }) {
   const back = PALACE_Z + 16; // run the floor under the whole palace so no gap shows at its base
   // The river runs x = -900..900, but the terrace only ever spanned x = -90..90. Past its end
   // the water plane's near edge (z = +30) met bare sky, which drew a thin dark diagonal across
@@ -214,7 +214,8 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
   // It is confined to that one boundary: 38.5 and 42.75 measure +0.3. Fixing it inside the
   // ink pass (ignore depth jumps on a single planar surface) is the next step; coarsening the
   // grid is not, because 64 x 4 is far worse.
-  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 64, 8)) b.add(g, M.cobble);
+  const NV = opts?.nv ?? 8;
+  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 64, NV)) b.add(g, M.cobble);
   // embankment wall down to the water (its face looks out over the river, toward -z).
   // nv = 1: the face is only 8 m tall, so its triangles are already small in y, and an extra
   // y-boundary would only add a constant-depth line for the ink pass to latch onto.
