@@ -346,6 +346,11 @@ jobs:
 
   gate:
     needs: [stitch]
+    # NOT the implicit success(): that evaluates the whole ancestor chain, so a job whose
+    # `render` was skipped (stitch_only) reads as unsuccessful and the gate never runs —
+    # which is exactly what happened on the first stitch-only run. Judge the one job that
+    # matters: did the stitch actually produce a film?
+    if: "!cancelled() && needs.stitch.result == 'success'"
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
