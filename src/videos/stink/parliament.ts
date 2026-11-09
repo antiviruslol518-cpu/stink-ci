@@ -41,7 +41,15 @@ export type PalaceOpts = { lit: number; lime: boolean };
  */
 function face(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, dir: THREE.Vector3, u1 = 1, v1 = 1) {
   const n = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a));
-  return n.dot(dir) >= 0 ? quad(a, b, c, d, u1, v1) : quad(a, d, c, b, u1, v1);
+  // `quad()` binds u to the a->b edge and v to the a->d edge. Reversing the winding to fix the
+  // normal (a, d, c, b) therefore SWAPS which world edge carries u and which carries v — but the
+  // caller's u1/v1 were computed for the a->b / a->d spans. Passing them through unchanged
+  // transposes the two, which is silent on a square face and catastrophic on a long thin one:
+  // the terrace floor came out 0.267 m/uv along its 34 m depth and 60 m/uv along its 510 m
+  // width, a 225:1 stretch (farbank wall: 4225:1). That is what put the sampler in the regime
+  // where frame 601 flipped to a brighter, sharper result for exactly one frame and snapped back.
+  // Swap the spans with the winding so u1/v1 always describe the axis they are actually used on.
+  return n.dot(dir) >= 0 ? quad(a, b, c, d, u1, v1) : quad(a, d, c, b, v1, u1);
 }
 
 /**
