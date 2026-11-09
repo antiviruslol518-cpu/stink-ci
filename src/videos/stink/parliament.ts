@@ -53,6 +53,44 @@ function face(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vec
 }
 
 /**
+ * A quad split into an nu x nv grid, for faces that are huge in world space.
+ *
+ * WHY THIS EXISTS: `quad()` emits a face as TWO triangles. The terrace floor is 510 m x 34 m,
+ * so each of its triangles is 500 m long with vertices far outside the frustum, and the raster
+ * interpolates every per-vertex value (uv, view-space position) across that span. Frame 601 of
+ * the film showed the consequence: a hard seam running exactly along the quad's triangle
+ * diagonal -- measured at row 921.7 + 0.026*x, against the observed 918..935 line, slope 0.0271
+ * vs 0.0260, a constant ~1 px offset over the whole width -- with everything on the near side of
+ * that diagonal drawn at a different texture LOD from everything beyond it. It is a per-triangle
+ * interpolation defect, so it appears and disappears with sub-pixel changes in where the huge
+ * triangles' vertices land, which is why it hit exactly one frame of a 147-frame shot.
+ *
+ * Splitting the face into a grid makes every triangle small and near the frame, so the
+ * interpolation never has to span the whole terrace. UVs stay continuous across the grid because
+ * each sub-quad gets the u/v range it actually occupies.
+ */
+function faceGrid(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, dir: THREE.Vector3, u1: number, v1: number, nu: number, nv: number) {
+  const out: THREE.BufferGeometry[] = [];
+  const lerp = (p: THREE.Vector3, q: THREE.Vector3, t: number) => new THREE.Vector3().lerpVectors(p, q, t);
+  // corner of the full quad at (i/nu along a->b, j/nv along a->d)
+  const P = (i: number, j: number) => lerp(lerp(a, b, i / nu), lerp(d, c, i / nu), j / nv);
+  // The winding fix must be decided once, from the FULL quad, so every sub-quad is flipped the
+  // same way. `face()` decides it per quad and then swaps the two uv spans with the winding; here
+  // the uv offsets are written out explicitly instead, because a sub-quad needs a non-zero u0/v0
+  // and the swap would put the offset on the wrong axis.
+  const flip = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a)).dot(dir) < 0;
+  for (let i = 0; i < nu; i++) {
+    for (let j = 0; j < nv; j++) {
+      const U0 = (u1 * i) / nu, U1 = (u1 * (i + 1)) / nu;
+      const V0 = (v1 * j) / nv, V1 = (v1 * (j + 1)) / nv;
+      const p00 = P(i, j), p10 = P(i + 1, j), p11 = P(i + 1, j + 1), p01 = P(i, j + 1);
+      out.push(flip ? quad(p00, p01, p11, p10, V1, U1, V0, U0) : quad(p00, p10, p11, p01, U1, V1, U0, V0));
+    }
+  }
+  return out;
+}
+
+/**
  * UV span for a face of `metres` metres, in the units cobbleHD/stoneHD are drawn in.
  *
  * WHY THIS EXISTS: `quad()` defaults to UV 0..1 over the WHOLE face, which is only right for a
@@ -154,9 +192,11 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
   // -420..420. Keeping the extension one-sided fixes the sky without touching the interior.
   const BANK_X = 420;
   // ground behind the parapet
-  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY)), M.cobble);
+  // 510 m x 34 m as ONE two-triangle quad drew a visible seam down its triangle diagonal on
+  // frame 601; 16 x 8 sub-quads keeps every triangle under ~32 m. See faceGrid().
+  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 16, 8)) b.add(g, M.cobble);
   // embankment wall down to the water (its face looks out over the river, toward -z)
-  b.add(face(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER, uvSpan(BANK_X + 90), uvSpan(D0 + 2)), M.wall);
+  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER, uvSpan(BANK_X + 90), uvSpan(D0 + 2), 16, 2)) b.add(g, M.wall);
   // parapet with coping
   b.add(boxGeo(V(-90, D0, QUAY - 0.9), V(90, D0 + 1.05, QUAY), 2), M.wall);
   b.add(boxGeo(V(-90, D0 + 1.05, QUAY - 1.05), V(90, D0 + 1.3, QUAY + 0.05), 2), M.cope);
@@ -186,8 +226,8 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
  * Its wall faces +z (back toward the palace); its ground runs away to -z.
  */
 export function farBank(b: Batch, M: Record<string, THREE.Material>) {
-  b.add(face(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, D0, -150), V(-260, D0, -150), UP, uvSpan(520), uvSpan(120)), M.cobble);
-  b.add(face(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, -2, -QUAY), V(-260, -2, -QUAY), UP_RIVER, uvSpan(520), uvSpan(D0 + 2)), M.wall);
+  for (const g of faceGrid(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, D0, -150), V(-260, D0, -150), UP, uvSpan(520), uvSpan(120), 16, 8)) b.add(g, M.cobble);
+  for (const g of faceGrid(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, -2, -QUAY), V(-260, -2, -QUAY), UP_RIVER, uvSpan(520), uvSpan(D0 + 2), 16, 2)) b.add(g, M.wall);
 
   // three rows, each further back and taller, so the skyline has depth instead of one flat band
   const rows: { z: number; h0: number; dh: number; w: number }[] = [
