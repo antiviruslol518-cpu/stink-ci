@@ -26,6 +26,10 @@ on:
         description: "GL backend. swangle is the only one that draws on a GPU-less runner."
         required: false
         default: "swangle"
+      props:
+        description: 'Optional JSON inputProps for A/B stills, e.g. {"post":{"lens":false}} or {"post":{"dpr":0.5}}. Empty = all passes on.'
+        required: false
+        default: ""
 
 jobs:
   stills:
@@ -81,6 +85,8 @@ jobs:
           ENTRY: src/index.ts
           STILL_SCALE: ${{ github.event.inputs.scale }}
           STILL_TIMEOUT_MS: "300000"
+          STILL_PROPS: ${{ github.event.inputs.props }}
+          STILL_TAG: ${{ github.event.inputs.props != '' && '__ab' || '' }}
         run: |
           FR="${{ github.event.inputs.frames }}"
           if [ -z "$FR" ]; then
