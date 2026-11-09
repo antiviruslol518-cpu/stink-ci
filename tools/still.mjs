@@ -1,6 +1,10 @@
 // still.mjs — render single frames as PNGs for the LOOK step. Same chrome/GL rules as render.mjs.
 // Usage: node tools/still.mjs <frame> [more frames...]   e.g. still.mjs 60 400 1000
 // Env: COMP, ENTRY, GL, CHROME, STILL_SCALE (default 0.5)
+//      STILL_PROPS  JSON inputProps, e.g. '{"post":{"ink":false}}' — the A/B switches in
+//                   Bridge.tsx let a post pass be turned off one at a time, which is how a
+//                   one-frame artifact gets traced to the pass that drew it.
+//      STILL_TAG    suffix for the output name, so two A/B runs do not overwrite each other.
 import fs from "node:fs";
 import path from "node:path";
 import { resolveChromeOrExit, chromiumOptions } from "./chrome.mjs";
@@ -9,6 +13,13 @@ const frames = process.argv.slice(2).map(Number).filter((n) => Number.isFinite(n
 if (!frames.length) {
   console.error("usage: still.mjs <frame> [more...]");
   process.exit(1);
+}
+
+const TAG = process.env.STILL_TAG || "";
+let inputProps = {};
+if (process.env.STILL_PROPS) {
+  try { inputProps = JSON.parse(process.env.STILL_PROPS); }
+  catch (e) { console.error(`STILL_PROPS is not valid JSON: ${e.message}`); process.exit(1); }
 }
 
 const TMP = process.env.REMOTION_TMP || "/tmp/remotion-tmp";
@@ -28,6 +39,7 @@ const comp = await selectComposition({
   id: process.env.COMP || "MyShort",
   browserExecutable: be,
   chromiumOptions: opts,
+  inputProps,
   logLevel: "warn",
 });
 
@@ -37,12 +49,13 @@ for (const f of frames) {
     console.log(`frame ${f} past film end (${comp.durationInFrames}) — skipped`);
     continue;
   }
-  const out = `out/stills/f_${String(f).padStart(4, "0")}.png`;
+  const out = `out/stills/f_${String(f).padStart(4, "0")}${TAG}.png`;
   await renderStill({
     composition: comp,
     serveUrl,
     frame: f,
     output: out,
+    inputProps,
     browserExecutable: be,
     chromiumOptions: opts,
     scale: Number(process.env.STILL_SCALE || 0.5),

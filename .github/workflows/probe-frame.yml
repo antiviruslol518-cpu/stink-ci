@@ -1,0 +1,148 @@
+name: probe-frame
+
+# Bisect a ONE-FRAME artifact by turning the post chain off one pass at a time.
+#
+# Why this exists: frame 601 of the film has its foreground replaced by cream banding for
+# exactly one frame. It reproduces in an ISOLATED still (stills run 42545166833), so it is
+# deterministic — not a render flake, not a splice, not a kick. That makes it bisectable:
+# render the same frame with ink / lens / bloom / grade each switched off, and the pass whose
+# absence removes the banding is the pass that drew it.
+#
+# ~8 min per still, so five variants is well under an hour — against ~3.3 h for chunk 5.
+# Bridge.tsx reads these toggles from inputProps (`post: {...}`), so nothing else changes.
+#
+# Trigger: Actions tab -> probe-frame -> Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      frame:
+        description: "Frame to probe"
+        required: false
+        default: "601"
+      scale:
+        description: "Still scale"
+        required: false
+        default: "0.6"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            ffmpeg libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+            libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 fonts-liberation || true
+          sudo apt-get install -y -qq --no-install-recommends libasound2t64 || \
+            sudo apt-get install -y -qq --no-install-recommends libasound2 || true
+          ffmpeg -version | head -1
+
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+
+      - name: get chrome
+        run: node tools/ensure-browser.mjs
+
+      - name: derive shots.json from story.ts
+        run: node tools/emit-shots.mjs shots.json
+
+      - name: "PROBE: prove WebGL draws"
+        env:
+          GL: swangle
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+        run: |
+          mkdir -p out
+          node tools/probe.mjs 30 300 900 1500 2>&1 | tee out/probe.txt
+          grep -q "RESULT: WebGL draws here" out/probe.txt || {
+            echo "::error::WebGL does not draw on this runner."
+            exit 1
+          }
+
+      - name: "bisect the frame across the post chain"
+        env:
+          GL: swangle
+          REMOTION_TMP: ${{ github.workspace }}/.rtmp
+          COMP: MyShort
+          ENTRY: src/index.ts
+          STILL_SCALE: ${{ github.event.inputs.scale }}
+          STILL_TIMEOUT_MS: "300000"
+          FRAME: ${{ github.event.inputs.frame }}
+        run: |
+          # One variant per pass. The first row is the control: if it does NOT show the
+          # artifact, the bug is state that only exists in a sequence, and this whole
+          # bisect is meaningless — check that before reading anything into the others.
+          variants=(
+            'all|{}'
+            'no-ink|{"post":{"ink":false}}'
+            'no-lens|{"post":{"lens":false}}'
+            'no-bloom|{"post":{"bloom":false}}'
+            'no-grade|{"post":{"grade":false}}'
+            'no-post|{"post":{"ink":false,"lens":false,"bloom":false,"grade":false}}'
+          )
+          for v in "${variants[@]}"; do
+            name="${v%%|*}"; props="${v#*|}"
+            echo "=== variant: $name  props: $props"
+            STILL_PROPS="$props" STILL_TAG="__$name" \
+              node tools/still.mjs "$FRAME" 2>&1 | tee "out/still_$name.txt" || {
+                echo "::error::variant $name failed to render"
+                continue
+              }
+          done
+          ls -la out/stills/
+
+      - name: compare variants
+        run: |
+          # The artifact is a set of horizontal cream bands across the terrace floor. The
+          # discriminator is EDGE: the mean absolute vertical gradient in the lower 45 % of
+          # the frame. A smooth floor is a gentle gradient; banding is a row of hard steps.
+          #
+          # Calibrated on the real frames (scale 0.6 stills of 599-603):
+          #   clean  599/600/602/603 -> 1.401 1.414 1.412 1.399
+          #   BAD    601             -> 2.327   (max 2nd-diff 7.66 vs 4.1-4.4 on clean frames)
+          # A row-mean second difference was tried first and did NOT separate them (0.434 vs
+          # 0.37-0.40) — it averages away exactly the full-width steps we are looking for.
+          python3 - <<'PY' | tee out/variants.txt
+          import glob, subprocess, os
+          import numpy as np
+          files = sorted(glob.glob("out/stills/*.png"))
+          if not files:
+              print("no stills produced"); raise SystemExit(0)
+          print(f"{'variant':<10} {'size':>10} {'edge':>7} {'maxD2':>7}  verdict")
+          for p in files:
+              raw = subprocess.run(["ffmpeg","-v","error","-i",p,"-f","rawvideo","-pix_fmt","rgb24","-"],
+                                   capture_output=True).stdout
+              info = subprocess.run(["ffprobe","-v","error","-show_entries","stream=width,height",
+                                     "-of","csv=p=0",p], capture_output=True, text=True).stdout.strip()
+              w, h = (int(x) for x in info.split(","))
+              F = np.frombuffer(raw, np.uint8).reshape(h, w, 3).astype(np.float32)
+              low = F[int(h * 0.55):].mean(axis=-1)          # luma of the terrace floor
+              edge = float(np.abs(np.diff(low, axis=0)).mean())
+              maxd2 = float(np.abs(np.diff(low.mean(1), 2)).max())
+              name = os.path.basename(p).replace(".png", "").split("__")[-1]
+              verdict = "BANDING" if edge > 1.8 else "clean"
+              print(f"{name:<10} {w}x{h:<6} {edge:7.3f} {maxd2:7.3f}  {verdict}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-frame
+          path: |
+            out/stills/*.png
+            out/variants.txt
+            out/still_*.txt
+          if-no-files-found: warn
+          retention-days: 7
