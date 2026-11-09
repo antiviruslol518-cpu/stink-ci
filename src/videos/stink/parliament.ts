@@ -193,10 +193,24 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
   const BANK_X = 420;
   // ground behind the parapet
   // 510 m x 34 m as ONE two-triangle quad drew a visible seam down its triangle diagonal on
-  // frame 601; 16 x 8 sub-quads keeps every triangle under ~32 m. See faceGrid().
-  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 16, 8)) b.add(g, M.cobble);
-  // embankment wall down to the water (its face looks out over the river, toward -z)
-  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER, uvSpan(BANK_X + 90), uvSpan(D0 + 2), 16, 2)) b.add(g, M.wall);
+  // frame 601. Subdivide along x ONLY (64 strips -> 8 m x 34 m, longest edge 34.9 m).
+  //
+  // WHY NOT ALSO ALONG Z: a 16 x 8 grid fixed the seam but drew a new ink line at z = 34.25,
+  // the far edge of the FIRST z-strip. That strip (z 30..34.25) contains the shot-6 camera
+  // (z = 30.25), so its triangles run behind the near plane and get clipped; the ink pass reads
+  // the depth edge at the strip's far boundary as a silhouette and draws a 9 px black band
+  // there (measured: -45.5 grey vs both neighbours; the other z-boundaries at 38.5 and 42.75
+  // read +0.3, i.e. clean). Verified by bisect: the band survives shadows off (-45.5) and
+  // vanishes with ink off (-0.8) or no-post (-0.9), so it is ink, not a shadow.
+  //
+  // Subdividing x only keeps every boundary out of the camera's own z-strip, and the defect
+  // the grid exists to fix was the 510 m x-extent, not the 34 m z-extent (which the pre-fix
+  // floor already had, with no artifact). 64 x 1 keeps the longest edge at 34.9 m.
+  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, D0, back), V(-90, D0, back), UP, uvSpan(BANK_X + 90), uvSpan(back - QUAY), 64, 1)) b.add(g, M.cobble);
+  // embankment wall down to the water (its face looks out over the river, toward -z).
+  // nv = 1 for the same reason: the y 6..2 strip contains the river-level cameras (y 3.0-3.5),
+  // so a boundary at y = 2 would ink the wall in shots 4 and 5 exactly as z = 34.25 did here.
+  for (const g of faceGrid(V(-90, D0, QUAY), V(BANK_X, D0, QUAY), V(BANK_X, -2, QUAY), V(-90, -2, QUAY), DOWN_RIVER, uvSpan(BANK_X + 90), uvSpan(D0 + 2), 64, 1)) b.add(g, M.wall);
   // parapet with coping
   b.add(boxGeo(V(-90, D0, QUAY - 0.9), V(90, D0 + 1.05, QUAY), 2), M.wall);
   b.add(boxGeo(V(-90, D0 + 1.05, QUAY - 1.05), V(90, D0 + 1.3, QUAY + 0.05), 2), M.cope);
@@ -226,8 +240,12 @@ export function terrace(b: Batch, M: Record<string, THREE.Material>) {
  * Its wall faces +z (back toward the palace); its ground runs away to -z.
  */
 export function farBank(b: Batch, M: Record<string, THREE.Material>) {
-  for (const g of faceGrid(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, D0, -150), V(-260, D0, -150), UP, uvSpan(520), uvSpan(120), 16, 8)) b.add(g, M.cobble);
-  for (const g of faceGrid(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, -2, -QUAY), V(-260, -2, -QUAY), UP_RIVER, uvSpan(520), uvSpan(D0 + 2), 16, 2)) b.add(g, M.wall);
+  // x-only subdivision for the same reason as the terrace floor above: a z-boundary is a
+  // constant-depth line, which is exactly what InkPass's depth-jump test keys on. The far bank
+  // is only ever seen from 40+ m, but the 520 m diagonal of the un-subdivided quad is the same
+  // class of per-triangle interpolation defect; 64 x 1 cuts it to 120 m and adds no z-boundary.
+  for (const g of faceGrid(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, D0, -150), V(-260, D0, -150), UP, uvSpan(520), uvSpan(120), 64, 1)) b.add(g, M.cobble);
+  for (const g of faceGrid(V(-260, D0, -QUAY), V(260, D0, -QUAY), V(260, -2, -QUAY), V(-260, -2, -QUAY), UP_RIVER, uvSpan(520), uvSpan(D0 + 2), 64, 1)) b.add(g, M.wall);
 
   // three rows, each further back and taller, so the skyline has depth instead of one flat band
   const rows: { z: number; h0: number; dh: number; w: number }[] = [
