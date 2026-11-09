@@ -30,6 +30,19 @@ const TMP = process.env.REMOTION_TMP || "/tmp/remotion-tmp";
 fs.mkdirSync(TMP, { recursive: true });
 process.env.TEMP = process.env.TMP = process.env.REMOTION_TMP = TMP;
 
+// Scale accepts "4/3" as well as "0.6". The skill documents `4/3` as the FINAL resolution and
+// render.mjs already parses it, but a bare Number("4/3") is NaN -- which Remotion rejects deep
+// inside renderStill with "`scale` should not be NaN", long after the bundle is built. A
+// final-resolution still is exactly what you want when checking whether a defect survives the
+// real render, so parse the fraction here too rather than silently rendering at NaN.
+const scaleArg = String(process.env.STILL_SCALE ?? "0.5").trim();
+const fm = scaleArg.match(/^(\d*\.?\d+)\s*\/\s*(\d*\.?\d+)$/);
+const STILL_SCALE = fm ? Number(fm[1]) / Number(fm[2]) : Number(scaleArg);
+if (!Number.isFinite(STILL_SCALE) || STILL_SCALE <= 0) {
+  console.error(`STILL_SCALE is not a number: "${scaleArg}" (use 0.6 or 4/3)`);
+  process.exit(1);
+}
+
 const be = resolveChromeOrExit();
 const { chromiumOptions: opts } = chromiumOptions();
 
@@ -62,7 +75,7 @@ for (const f of frames) {
     inputProps,
     browserExecutable: be,
     chromiumOptions: opts,
-    scale: Number(process.env.STILL_SCALE || 0.5),
+    scale: STILL_SCALE,
     // The first still pays shader compile for the whole post chain. Remotion's default
     // page-function timeout is 30 s, which a three.js scene blows past on software WebGL.
     timeoutInMilliseconds: Number(process.env.STILL_TIMEOUT_MS || 180000),
