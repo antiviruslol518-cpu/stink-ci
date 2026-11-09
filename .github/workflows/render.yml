@@ -403,8 +403,15 @@ jobs:
 
       - name: "THE GATE — qa-gate decides if this is finished"
         run: |
+          # The gate's exit code MUST become the step's exit code. Piping into tee replaces
+          # the step's status with tee's, so the previous version printed "gate exit: 1" and
+          # still reported a GREEN job — a failing film shipped as a success. Capture, echo,
+          # then re-raise.
+          set +e
           bash tools/qa-gate.sh out/video.mp4 out/render.log shots.json 2>&1 | tee out/gate.txt
-          echo "gate exit: ${PIPESTATUS[0]}"
+          RC=${PIPESTATUS[0]}
+          echo "gate exit: $RC"
+          exit $RC
 
       - uses: actions/upload-artifact@v4
         if: always()
