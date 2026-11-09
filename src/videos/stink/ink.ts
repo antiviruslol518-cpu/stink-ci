@@ -220,14 +220,14 @@ void main() {
     float hi = floor(v);                           // high byte, integer
     gl_FragColor = vec4(v - hi, hi / 255.0, 0.0, 1.0); return;  // R = fraction, G = high/255
   }
-  // dbgTerm 5: pack the strongest -s this pixel found, over 0..0.05, into R (fraction) / G
-  // (high byte). dbgTerm 6: pack the plane offset that went with it, over 0..0.2 m.
-  // The probe reads the mask target back and logs the raw 16-bit value, so the CPU gets the
-  // shader's own numbers instead of a prediction from geometry.
+  // dbgTerm 5: the two numbers that decide whether this pixel inks, packed so ONE still carries
+  // both. R = fraction of -s, G = high byte of -s over 0..0.05; B = the plane offset that went
+  // with that -s, over 0..0.2 m at 8 bits (0.78 mm per step -- the coplanar guard's ramp is
+  // 15..60 mm, so 8 bits resolves it with ~20x headroom). Two terms became one run.
   if (dbgTerm > 4.5) {
-    float v = clamp((dbgTerm > 5.5 ? dbgOff / 0.2 : dbgS / 0.05), 0.0, 1.0) * 255.0;
+    float v = clamp(dbgS / 0.05, 0.0, 1.0) * 255.0;
     float hi = floor(v);
-    gl_FragColor = vec4(v - hi, hi / 255.0, 0.0, 1.0); return;
+    gl_FragColor = vec4(v - hi, hi / 255.0, clamp(dbgOff / 0.2, 0.0, 1.0), 1.0); return;
   }
   gl_FragColor = vec4(ink, fogK, 0.0, 1.0);
 }`;
@@ -438,13 +438,14 @@ export class InkPass extends Pass {
         const vals: string[] = [];
         for (let c = 0; c < w; c += step) {
           const i = (r * w + c) * 4;
-          // term 4: depth over 0..8 m; term 5: -s over 0..0.05; term 6: plane offset over 0..0.2 m
-          const span = this.term === 4 ? 8.0 : this.term === 5 ? 0.05 : 0.2;
+          // term 4: depth over 0..8 m; term 5: -s over 0..0.05 (plus offset over 0..0.2 in B)
+          const span = this.term === 4 ? 8.0 : 0.05;
           // Unpack: G holds hi/255, R holds the fraction. (hi + frac)/255 * span. The earlier
           // `(G/255) + (R/255)/255` divided the fraction by 255 twice, so the value was 8-bit
           // only -- 31 mm of depth per code step, which cannot see a 23 mm step at all.
           const v = ((buf[i + 1] + buf[i] / 255) / 255) * span;
-          vals.push(v.toPrecision(6));
+          const off = this.term === 5 ? buf[i + 2] / 255 * 0.2 : 0;
+          vals.push(this.term === 5 ? `${v.toPrecision(4)}/${off.toPrecision(3)}` : v.toPrecision(6));
         }
         out.push(`  row ${r0 + (h - 1 - r)}: ${vals.join(" ")}`);
       }
