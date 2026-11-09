@@ -11,7 +11,7 @@ vid, out = sys.argv[1], sys.argv[2]
 meta = json.load(open(sys.argv[3])) if len(sys.argv) > 3 else {}
 shots = meta.get("shots", [])
 planned = set()
-for a, b in meta.get("xfade", []) + meta.get("planned", []) + ([meta["flash"]] if "flash" in meta else []):
+for a, b in meta.get("xfade", []) + meta.get("planned", []) + ([meta["flash"]] if "flash" in meta else []) + meta.get("kicks", []):
     planned.update(range(a - 1, b + 1))
 for s in shots:
     planned.update((s["a"] - 1, s["a"]))

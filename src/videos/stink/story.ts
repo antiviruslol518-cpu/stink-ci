@@ -254,12 +254,18 @@ const CAMS: Record<number, Key[]> = {
 // impact kicks (reference v14): the image offset flips sign every frame (~3 px at 720p per unit), decays to 0 in
 // 7 f, roll +-0.23 deg per unit; they start on the first frame at/after the event. No hand-held float.
 // Anchored to measured word onsets: "It was not" (48.41), the sewer reveal (38.56), the final line (61.28).
-const KICKS: [number, number][] = [[38.56, 0.8], [48.41, 1.0], [52.32, 0.5], [61.28, 0.7]];
+// EXPORTED so tools/emit-shots.mjs can declare the shake window to qa-gate. A kick is a
+// designed camera jolt: it flips the image offset every frame, so the whole-frame diff jumps
+// far above its neighbours (frame 1840 measures 50.6 against a local median of 10.5). The
+// gate calls any undeclared spike a glitch, so without this it fails a film that is correct.
+export const KICKS: [number, number][] = [[38.56, 0.8], [48.41, 1.0], [52.32, 0.5], [61.28, 0.7]];
+/** how long a kick moves the camera for, in frames (n = 0..KICK_FRAMES-1 in kickAt) */
+export const KICK_FRAMES = 7;
 export const kickAt = (t: number) => {
   let a = 0;
   for (const [t0, g] of KICKS) {
     const n = Math.floor((t - t0) * FPS + 1e-6);
-    if (n >= 0 && n < 7) a += g * (n % 2 ? -1 : 1) * (1 - n / 7) ** 1.5;
+    if (n >= 0 && n < KICK_FRAMES) a += g * (n % 2 ? -1 : 1) * (1 - n / KICK_FRAMES) ** 1.5;
   }
   return a;
 };

@@ -36,7 +36,7 @@ const res = await build({
 const code = res.outputFiles[0].text;
 const mod = await import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 
-const { TOTAL, SHOTS, XFADE, FLASH_AT } = mod;
+const { TOTAL, SHOTS, XFADE, FLASH_AT, KICKS, KICK_FRAMES, FPS: FPSX } = mod;
 if (!Number.isFinite(TOTAL) || !Array.isArray(SHOTS) || !SHOTS.length) {
   console.error("emit-shots: story.ts did not export TOTAL + a non-empty SHOTS array");
   process.exit(1);
@@ -73,18 +73,32 @@ for (const [id, x] of Object.entries(XFADE ?? {})) {
   xfade.push([Math.max(0, s.a - half), Math.min(TOTAL, s.a + half + 1)]);
 }
 
+// --- impact kicks: a DESIGNED camera shake, not a glitch --------------------------------
+// kickAt() starts at the first frame at/after t0 and moves the camera for KICK_FRAMES, so the
+// spike lives in frames ceil(t0*FPS) .. that + KICK_FRAMES. Declare one frame of slack either
+// side: the diff between frame f and f+1 can belong to either, and rounding of t0*FPS is not
+// guaranteed to land on the same side as the renderer's floor().
+const fps = FPSX ?? 30;
+const kicks = (KICKS ?? []).map(([t0]) => {
+  const start = Math.floor(t0 * fps + 1e-6);
+  return [Math.max(0, start - 1), Math.min(TOTAL, start + (KICK_FRAMES ?? 7) + 1)];
+});
+
 const meta = {
   total: TOTAL,
-  fps: mod.FPS ?? 30,
-  duration: Number((TOTAL / (mod.FPS ?? 30)).toFixed(3)),
+  fps,
+  duration: Number((TOTAL / fps).toFixed(3)),
   shots: SHOTS.map((s) => ({ id: s.id, a: s.a, b: s.b })),
   xfade,
   // every hard cut is a legit frame-diff spike; the gate must not call it a pop
   cuts: SHOTS.slice(1).map((s) => s.a),
   ...(Number.isFinite(FLASH_AT) ? { flash: [FLASH_AT, FLASH_AT + 4] } : {}),
+  // the designed impact shakes, for the same reason as the cuts
+  ...(kicks.length ? { kicks } : {}),
 };
 
 fs.writeFileSync(OUT, JSON.stringify(meta, null, 2) + "\n");
 console.log(`emit-shots: ${OUT}`);
 console.log(`  ${SHOTS.length} shots, ${TOTAL} frames (${meta.duration}s @ ${meta.fps}fps)`);
-console.log(`  ${meta.cuts.length} cuts, ${xfade.length} crossfades${meta.flash ? ", 1 flash" : ""}`);
+console.log(`  ${meta.cuts.length} cuts, ${xfade.length} crossfades${meta.flash ? ", 1 flash" : ""}${kicks.length ? `, ${kicks.length} impact kicks` : ""}`);
+for (const [a, b] of kicks) console.log(`    kick frames ${a}-${b - 1}`);
