@@ -9,7 +9,7 @@ import { beam, ctex, stoneHD, cobbleHD, waterNear, waterFar, cloudHD } from "./p
 import { LIGHTS, LOOK, LightPreset } from "./lights";
 import { TONE, CHAR, LFB, twoTone, untone } from "./shade";
 import { NOINK } from "./ink";
-import { Pool, Actor, Fx, stage, burstFx } from "./cast";
+import { Pool, Actor, Fx, stage, burstFx, Stage } from "./cast";
 import { palace, terrace, farBank, sewer, chamber, flotsam, PARLIAMENT } from "./parliament";
 import { FPS, D0, SHOTS, camAt, V3, FOREGROUND, ShotDef } from "./story";
 
@@ -60,6 +60,8 @@ export class World {
   private WU: Record<string, THREE.IUniform>;
   private sunDisc: THREE.Sprite; private sunHalo: THREE.Sprite;
   private sunCache = new Map<number, THREE.Vector3>();
+  /** test-still switch (post.cast=false): skip the cast AND its contact blobs entirely */
+  private noCast = false;
   private cloudMaps: Record<"day" | "golden", THREE.Texture[]>;
   private fgs: { o: THREE.Object3D; a: number; b: number }[] = [];
   private smoke: { m: THREE.Mesh; mat: THREE.MeshLambertMaterial; top: V3; k: number }[] = [];
@@ -69,8 +71,12 @@ export class World {
 
   /** `shadows: false` is a test-still switch only (Bridge's `post.shadows`). It is the one flag that
    *  separates shadow-map acne from a texture/mip problem on a grazing ground plane: acne vanishes
-   *  when the sun stops casting, a texture defect does not. */
-  constructor(kit: Kit, opts?: { shadows?: boolean }) {
+   *  when the sun stops casting, a texture defect does not.
+   *  `cast: false` is the second test switch (Bridge's `post.cast`). Frame 601's defect is the terrace
+   *  floor drawing OVER the Members' lower halves while their heads stay identical, so the question is
+   *  whether the depth/occlusion flip needs the cast at all: with no characters and no contact blobs the
+   *  floor is the only thing in the lower frame, and the frame either changes or it does not. */
+  constructor(kit: Kit, opts?: { shadows?: boolean; cast?: boolean }) {
     const R = this.root, M: Mats = {};
     // ---- sky + light ----
     // sky: 5 colour stops by elevation (textures.md 5.2 #5 + depth.md 2/6.5), written as tone-map-inverted linear values
@@ -98,6 +104,7 @@ export class World {
     this.hemi = new THREE.HemisphereLight("#cfe6ff", "#6c5c8c", 1.1);
     this.sun = new THREE.DirectionalLight("#fff0d6", 2.6);
     this.sun.castShadow = opts?.shadows !== false;
+    this.noCast = opts?.cast === false;
     this.sun.shadow.mapSize.set(4096, 4096);
     this.fill = new THREE.DirectionalLight("#9fb8ff", 0.35);
     R.add(this.hemi, this.sun, this.sun.target, this.fill, this.fill.target);
@@ -254,7 +261,7 @@ export class World {
     }
     // ---- cast + effects ----
     const right = V(0, 0, 0).setFromMatrixColumn(cam.matrixWorld, 0);
-    const st = stage(id, t, { pos: cam.position, right });
+    const st: Stage = this.noCast ? { places: [], fx: [] } : stage(id, t, { pos: cam.position, right });
     // the impact beats: a burst where the picture kicks (see KICKS in story.ts)
     if (id === 10) burstFx(t, 38.56, [0, -12.0, 0], st, 2.2);
     if (id === 11) burstFx(t, 48.41, [0, D0 + 1.6, 33], st, 1.4);
