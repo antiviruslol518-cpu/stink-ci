@@ -415,7 +415,7 @@ export class InkPass extends Pass {
     renderer.render(this.fsScene, this.fsCam);
 
     // 2b) test only (term 4): read the packed depth back out of the mask target and log it.
-    if (this.term === 4 && this.probe) {
+    if (this.term >= 4 && this.probe) {
       const p = this.probe, th = this.maskRT.height, tw = this.maskRT.width;
       // Rows may be given as fractions of the target height (0..1). The mask target is the
       // CANVAS size, not the still's output size, and at STILL_SCALE 0.6 those differ by
