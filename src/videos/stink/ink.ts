@@ -115,6 +115,9 @@ uniform float fadeNear;
 uniform float fadeFar;
 uniform float strength;
 uniform float useMain;
+uniform float killD;   // test only: 1 = ignore the depth-jump term
+uniform float killN;   // test only: 1 = ignore the crease term
+uniform float dbgTerm; // test only: 1 = output eD only, 2 = eN only, 0 = combined
 uniform float pxScale;   // output px per 1080x1920 px
 uniform vec2 fogRange;   // scene fog near / far (m); far <= near = no fog tint
 uniform float fogStart;  // ink stays pure black up to here (m), then tints toward the fog colour
@@ -190,7 +193,8 @@ void main() {
     }
   }
 
-  float ink = max(eD, eN) * strength * mix(1.0, farOpacity, t) * (1.0 - smoothstep(fadeNear, fadeFar, zc));
+  float eCombined = dbgTerm > 1.5 ? eN : (dbgTerm > 0.5 ? eD : max(eD, eN));
+  float ink = eCombined * strength * mix(1.0, farOpacity, t) * (1.0 - smoothstep(fadeNear, fadeFar, zc));
   float f0 = max(fogRange.x, fogStart);
   float fogK = fogRange.y > f0 ? clamp((zc - f0) / (fogRange.y - f0), 0.0, 1.0) : 0.0;
   gl_FragColor = vec4(ink, fogK, 0.0, 1.0);
@@ -235,6 +239,8 @@ void main() {
 export class InkPass extends Pass {
   /** 0 = normal, 1 = show the ink mask, 2 = show the world normal buffer */
   debug = 0;
+  /** test only: 0 = both edge terms, 1 = depth-jump only, 2 = crease only */
+  term = 0;
   private world: THREE.Scene;
   private cam: THREE.PerspectiveCamera;
   private rt: THREE.WebGLRenderTarget;
@@ -297,7 +303,7 @@ export class InkPass extends Pass {
       creaseScale: { value: o.creaseScale }, depthLo: { value: o.depthLo }, depthHi: { value: o.depthHi },
       cosLo: { value: Math.cos((o.angleLo * Math.PI) / 180) }, cosHi: { value: Math.cos((o.angleHi * Math.PI) / 180) },
       concaveGain: { value: o.concaveGain }, farOpacity: { value: o.farOpacity },
-      fadeNear: { value: o.fadeNear }, fadeFar: { value: o.fadeFar }, strength: { value: o.strength }, useMain: { value: 0 }, pxScale: { value: 1 }, fogRange: { value: new THREE.Vector2(0, 0) }, fogStart: { value: 60 },
+      fadeNear: { value: o.fadeNear }, fadeFar: { value: o.fadeFar }, strength: { value: o.strength }, useMain: { value: 0 }, killD: { value: 0 }, killN: { value: 0 }, dbgTerm: { value: 0 }, pxScale: { value: 1 }, fogRange: { value: new THREE.Vector2(0, 0) }, fogStart: { value: 60 },
     });
     this.compMat = fs(COMP_FRAG, {
       inputBuffer: { value: null }, tMask: { value: this.maskRT.texture }, tNormal: { value: this.rt.texture },
@@ -371,6 +377,7 @@ export class InkPass extends Pass {
     // 3) composite into a temp target, 4) copy back into the input buffer (colour only; depth untouched)
     this.compMat.uniforms.inputBuffer.value = inputBuffer.texture;
     this.compMat.uniforms.debug.value = this.debug;
+    this.maskMat.uniforms.dbgTerm.value = this.term;
     this.quad.material = this.compMat;
     renderer.setRenderTarget(this.tmpRT);
     renderer.render(this.fsScene, this.fsCam);
